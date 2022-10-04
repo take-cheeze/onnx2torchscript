@@ -1,6 +1,6 @@
 from ast import Call
 from fnmatch import fnmatch
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Tuple, overload
 
 import onnx
 import torch
@@ -57,21 +57,38 @@ def onnx2ts(model: onnx.ModelProto, verbose: bool = False) -> torch._C.Graph:
     for v in model.graph.input:
         values[v.name] = ret.addInput()
         values[v.name].setDebugName(v.name)
-    # for v in model.graph.output:
-    #     values[v.name] = ret.registerOutput()
 
     domain2opset: Dict[str, int] = {}
     for o in model.opset_import:
         domain2opset[o.domain] = o.version
 
-    for n in model.graph.node:
-        g = graph_of_onnx_op(n.op_type, domain2opset[n.domain])
-        p(g)
-        for n_idx, t_n in enumerate(g.nodes()):
-            p(t_n)
-            for s_idx, s_n in enumerate(g.nodes()):
-                ins = []
-                c = ret.create(s_n.kind(), ins, len(list(s_n.outputs())))
-                p(c)
+    model_output_names = [v.name for v in model.graph.output]
+
+    for o_n in model.graph.node:
+        t_g = graph_of_onnx_op(o_n.op_type, domain2opset[o_n.domain])
+
+        t_values: Dict[str, str] = {}
+        for o_i, t_i in zip(o_n.input, t_g.inputs()):
+            t_i.setDebugName(f"{o_n.name}_{t_i.debugName()}")
+            t_values[t_i.debugName()] = o_i
+
+        for t_n in t_g.nodes():
+            ins = [values[t_values[t_i.debugName()]] for t_i in t_n.inputs()]
+            op_name = t_n.kind()
+            c = ret.create(op_name, ins, len(list(t_n.outputs())))
+            c.copyAttributes(t_n)
+            for c_o, t_o in zip(c.outputs(), t_n.outputs()):
+                c_o.setDebugName(f"{o_n.name}_{t_n.kind().split('::')[-1]}_{t_o.debugName()}")
+                values[c_o.debugName()] = c_o
+                t_values[t_o.debugName()] = c_o.debugName()
+                c_o.setType(t_o.type())
+            ret.insertNode(c)
+
+        for o_o, t_o in zip(o_n.output, t_g.outputs()):
+            if o_o in model_output_names:
+                values[o_o] = values[t_values[t_o.debugName()]]
+
+    for v in model.graph.output:
+        ret.registerOutput(values[v.name])
 
     return ret
