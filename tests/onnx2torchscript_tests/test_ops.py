@@ -15,7 +15,6 @@ def test_add():
     torch.onnx.export(M(), (a, b), f.name)
     m: onnx.ModelProto = onnx.load_model(f.name)
     ts = o2t.onnx2ts(m)
-    f = torch._C._create_function_from_graph(m.name, ts)
-    assert M()(a, b) == f(a, b)
-
     print(ts)
+    f = torch._C._create_function_from_graph(m.graph.name, ts)
+    assert M()(a, b) == f(a, b)
