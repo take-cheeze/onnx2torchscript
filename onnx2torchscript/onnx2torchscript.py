@@ -1,6 +1,7 @@
 from ast import Call
 from fnmatch import fnmatch
-from typing import Callable, Dict, Tuple, overload
+from typing import Callable, Dict, Optional, Tuple
+
 
 import onnx
 import torch
@@ -24,8 +25,23 @@ def onnx_op(op_type: str, opset_version: int = 0, domain = "") -> Callable:
 
 
 @onnx_op("Add", 1)
-def op_Add(a, b):
+def op_Add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a + b
+
+
+@onnx_op("Gemm", 11)
+def op_Gemm(
+    a: torch.Tensor, b: torch.Tensor, c: Optional[torch.Tensor] = None,
+    alpha = 1.0, beta = 1.0, transA = 0, transB = 0
+) -> torch.Tensor:
+    if transA:
+        a = a.swapaxes(-1, -2)
+    if transB:
+        b = b.swapaxes(-1, -2)
+    if c is not None:
+        return torch.addbmm(c, a, b, beta=beta, alpha=alpha)
+    else:
+        return torch.mm(a, b) * alpha
 
 
 def graph_of_onnx_op(op_type: str, opset_version: int = 0) -> torch._C.Graph:
