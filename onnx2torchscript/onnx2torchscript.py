@@ -127,13 +127,7 @@ def onnx2ts(model: onnx.ModelProto, verbose: bool = False) -> torch._C.Graph:
             if o_a.type == onnx.AttributeProto.AttributeType.UNDEFINED:
                 continue
 
-            v = None
-            if o_a.type == onnx.AttributeProto.AttributeType.INT:
-                v = o_a.i
-            elif o_a.type == onnx.AttributeProto.AttributeType.FLOAT:
-                v = o_a.f
-            assert v is not None
-            o_attr_vals[name] = v
+            o_attr_vals[name] = onnx.helper.get_attribute_value(o_a)
 
         for t_a_idx, (t_a, t_i) in enumerate(zip(t_sch.arguments, t_g.inputs())):
             if t_a.kwarg_only:
