@@ -18,6 +18,11 @@
                 "panel": "shared",
                 "showReuseMessage": true,
                 "clear": true
+            },
+            "options": {
+                "env": {
+                    "TORCH_SHOW_CPP_STACKTRACES": "1"
+                }
             }
         }
     ]
