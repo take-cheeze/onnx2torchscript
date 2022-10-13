@@ -5,6 +5,7 @@ from pyclbr import Function
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import onnx
+import onnx.numpy_helper
 import torch
 
 
@@ -27,6 +28,7 @@ def onnx_op(op_type: str, opset_version: int = 0, domain = "") -> Callable:
 def op_Add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a + b
 
+
 @onnx_op("Gemm", 11)
 def op_Gemm(
     a: torch.Tensor, b: torch.Tensor, c: Optional[torch.Tensor] = None,
@@ -41,6 +43,11 @@ def op_Gemm(
         return torch.addmm(c, a, b, beta=beta, alpha=alpha)
     else:
         return torch.mm(a, b) * alpha
+
+
+@onnx_op("Constant", 1)
+def op_Constant(*, value: torch.Tensor) -> torch.Tensor:
+    return value
 
 
 def get_onnx_ts(op_type: str, opset_version: int = 0, domain: str = "") -> torch._C.ScriptFunction:
@@ -96,7 +103,10 @@ def onnx2ts(model: onnx.ModelProto, verbose: bool = False) -> torch._C.Graph:
     values: Dict[str, torch._C.Value] = {}
     for v in model.graph.input:
         values[v.name] = ret.addInput()
-        values[v.name].setDebugName(v.name)
+        name = v.name
+        if name.isnumeric():
+            name = f"input_{name}"
+        values[v.name].setDebugName(name)
 
     domain2opset: Dict[str, int] = {}
     for o in model.opset_import:
@@ -127,7 +137,10 @@ def onnx2ts(model: onnx.ModelProto, verbose: bool = False) -> torch._C.Graph:
             if o_a.type == onnx.AttributeProto.AttributeType.UNDEFINED:
                 continue
 
-            o_attr_vals[name] = onnx.helper.get_attribute_value(o_a)
+            attr_value = onnx.helper.get_attribute_value(o_a)
+            if o_a.type == onnx.AttributeProto.AttributeType.TENSOR:
+                attr_value = torch.from_numpy(onnx.numpy_helper.to_array(attr_value))
+            o_attr_vals[name] = attr_value
 
         for t_a_idx, (t_a, t_i) in enumerate(zip(t_sch.arguments, t_g.inputs())):
             if t_a.kwarg_only:

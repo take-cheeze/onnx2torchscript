@@ -6,13 +6,13 @@ import torch
 import onnx
 import tempfile
 
-def run_op_test(f: Callable, *args):
+def run_op_test(f: Callable, *args, opset_version: int = 11):
     class M(torch.nn.Module):
         def forward(self, *args):
             return f(*args)
 
     tmp = tempfile.NamedTemporaryFile()
-    torch.onnx.export(M(), args, tmp.name)
+    torch.onnx.export(M(), args, tmp.name, opset_version=opset_version)
     m: onnx.ModelProto = onnx.load_model(tmp.name)
     ts = o2t.onnx2ts(m)
     torch._C._jit_pass_lint(ts)
