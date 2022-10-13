@@ -26,6 +26,8 @@ jobs:
         - os: windows-latest
           cache-path: ~\AppData\Local\pip\Cache
     runs-on: ${{ matrix.os }}
+    env:
+      TORCH_SHOW_CPP_STACKTRACES: 1
 
     steps:
     - uses: actions/checkout@v3
