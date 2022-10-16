@@ -29,6 +29,11 @@ def op_Add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a + b
 
 
+@onnx_op("Mul", 1)
+def op_Mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a * b
+
+
 @onnx_op("Gemm", 11)
 def op_Gemm(
     a: torch.Tensor, b: torch.Tensor, c: Optional[torch.Tensor] = None,
@@ -84,7 +89,8 @@ def onnx2ts(model: onnx.ModelProto, args: Any, verbose: bool = False) -> torch._
         def __init__(self) -> None:
             super().__init__()
             for i in model.graph.initializer:
-                setattr(self, i.name, torch.from_numpy(onnx.numpy_helper.to_array(i)))
+                p = torch.from_numpy(onnx.numpy_helper.to_array(i).copy())
+                setattr(self, i.name, torch.nn.parameter.Parameter(p))
 
         def forward(self, *args):
             values: Dict[str, Any] = {}
