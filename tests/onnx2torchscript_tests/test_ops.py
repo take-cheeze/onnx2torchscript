@@ -1,10 +1,10 @@
-from turtle import forward
 from typing import Callable
 import onnx2torchscript as o2t
 
 import torch
 import onnx
 import tempfile
+
 
 def run_op_test(f: Callable, *args, opset_version: int = 11) -> onnx.ModelProto:
     if isinstance(f, torch.nn.Module):
@@ -28,8 +28,10 @@ def run_op_test(f: Callable, *args, opset_version: int = 11) -> onnx.ModelProto:
 
     return m
 
+
 def test_add():
     run_op_test(lambda a, b: a + b, torch.randn(10), torch.randn(10))
+
 
 def test_gemm():
     run_op_test(
@@ -39,6 +41,7 @@ def test_gemm():
         lambda c, a, b: torch.addmm(c, a, b),
         torch.randn(10, 10), torch.randn(10, 10),
         torch.randn(10, 10))
+
 
 def test_initializer():
     class M(torch.nn.Module):
