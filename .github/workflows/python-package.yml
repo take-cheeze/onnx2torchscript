@@ -37,7 +37,6 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - uses: actions/cache@v3
-      if: startsWith(runner.os, 'Linux')
       with:
         path: ${{ matrix.cache-path }}
         key: ${{ runner.os }}-pip-${{ hashFiles('**/setup.py') }}-${{ matrix.torch-version }}
