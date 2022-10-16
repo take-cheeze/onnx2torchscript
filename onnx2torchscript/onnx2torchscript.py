@@ -1,7 +1,4 @@
 from ast import Call
-from curses.ascii import isalnum
-from fnmatch import fnmatch
-from pyclbr import Function
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import onnx
