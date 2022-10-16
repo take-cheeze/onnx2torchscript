@@ -32,8 +32,8 @@ def op_Add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 @onnx_op("Gemm", 11)
 def op_Gemm(
     a: torch.Tensor, b: torch.Tensor, c: Optional[torch.Tensor] = None,
-    *,
-    alpha: float, beta: float, transA: int, transB: int
+    # *,  # Commenting out due to kwargs unsupported in trace mode
+    alpha: float = 1.0, beta: float = 1.0, transA: int = 0, transB: int = 0
 ) -> torch.Tensor:
     if transA:
         a = a.swapaxes(-1, -2)
@@ -46,7 +46,10 @@ def op_Gemm(
 
 
 @onnx_op("Constant", 1)
-def op_Constant(*, value: torch.Tensor) -> torch.Tensor:
+def op_Constant(
+    # *,
+    value: torch.Tensor
+) -> torch.Tensor:
     return value
 
 
@@ -68,109 +71,72 @@ def get_onnx_ts(op_type: str, opset_version: int = 0, domain: str = "") -> torch
     return ret
 
 
-def _copy_node(dst: torch._C.Node, src: torch._C.Node, t_values: Dict[str, str], values: Dict[str, torch._C.Value]) -> None:
-    dst.copyAttributes(src)
-    for b in src.blocks():
-        new_b = dst.addBlock()
-
-        for n in b.nodes():
-            new_inputs = []
-            for i in n.inputs():
-                new_i = values[t_values[i.debugName()]]
-                new_inputs.append(new_i)
-            new_n = new_b.addNode(n.kind(), new_inputs)
-            for o in n.outputs():
-                new_o = new_n.addOutput()
-                new_o_name = o.debugName()
-                if new_o_name.isnumeric():
-                    new_o_name = f"{n.kind().split('::')[-1]}_{new_o_name}"
-                new_o.setDebugName(new_o_name)
-                t_values[o.debugName()] = new_o.debugName()
-                values[new_o.debugName()] = new_o
-            _copy_node(new_n, n, t_values, values)
-
-        for o in b.outputs():
-            new_b.registerOutput(values[t_values[o.debugName()]])
-
-
-def onnx2ts(model: onnx.ModelProto, verbose: bool = False) -> torch._C.Graph:
+def onnx2ts(model: onnx.ModelProto, args: Any, verbose: bool = False) -> torch._C.ScriptModule:
     def p(*a):
         if verbose:
             print(*a)
-
-    ret: torch._C.Graph = torch._C.Graph()
-
-    values: Dict[str, torch._C.Value] = {}
-    for v in model.graph.input:
-        values[v.name] = ret.addInput()
-        name = v.name
-        if name.isnumeric():
-            name = f"input_{name}"
-        values[v.name].setDebugName(name)
 
     domain2opset: Dict[str, int] = {}
     for o in model.opset_import:
         domain2opset[o.domain] = o.version
 
-    model_output_names = [v.name for v in model.graph.output]
+    class OnnxModule(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            for i in model.graph.initializer:
+                setattr(self, i.name, torch.from_numpy(onnx.numpy_helper.to_array(i)))
 
-    for o_n in model.graph.node:
-        t_s = get_onnx_ts(o_n.op_type, domain2opset[o_n.domain], o_n.domain)
-        t_sch = t_s.schema
-        t_g = t_s.graph
-        o_sch = onnx.defs.get_schema(o_n.op_type, domain2opset[o_n.domain], o_n.domain)
+        def forward(self, *args):
+            values: Dict[str, Any] = {}
+            for a, i in zip(args, model.graph.input):
+                values[i.name] = a
+            for i in model.graph.initializer:
+                values[i.name] = getattr(self, i.name)
+            for o_n in model.graph.node:
+                o_sch = onnx.defs.get_schema(o_n.op_type, domain2opset[o_n.domain], o_n.domain)
 
-        t_values: Dict[str, str] = {}
-        for o_i, t_i in zip(o_n.input, t_g.inputs()):
-            t_i.setDebugName(f"{o_n.name}_{t_i.debugName()}")
-            t_values[t_i.debugName()] = o_i
+                o_attrs: Dict[str, onnx.AttributeProto] = {}
+                for name, o_sch_a in o_sch.attributes.items():
+                    if o_sch_a.default_value is not None:
+                        o_attrs[name] = o_sch_a.default_value
+                for o_a in o_n.attribute:
+                    o_attrs[o_a.name] = o_a
 
-        o_attrs: Dict[str, onnx.AttributeProto] = {}
-        for name, o_sch_a in o_sch.attributes.items():
-            if o_sch_a.default_value is not None:
-                o_attrs[name] = o_sch_a.default_value
-        for o_a in o_n.attribute:
-            o_attrs[o_a.name] = o_a
+                o_attr_vals: Dict[str, Any] = {}
+                for name, o_a in o_attrs.items():
+                    if o_a.type == onnx.AttributeProto.AttributeType.UNDEFINED:
+                        continue
 
-        o_attr_vals: Dict[str, Any] = {}
-        for name, o_a in o_attrs.items():
-            if o_a.type == onnx.AttributeProto.AttributeType.UNDEFINED:
-                continue
+                    attr_value = onnx.helper.get_attribute_value(o_a)
+                    if o_a.type == onnx.AttributeProto.AttributeType.TENSOR:
+                        attr_value = torch.from_numpy(onnx.numpy_helper.to_array(attr_value))
+                    o_attr_vals[name] = attr_value
 
-            attr_value = onnx.helper.get_attribute_value(o_a)
-            if o_a.type == onnx.AttributeProto.AttributeType.TENSOR:
-                attr_value = torch.from_numpy(onnx.numpy_helper.to_array(attr_value))
-            o_attr_vals[name] = attr_value
+                t_s = get_onnx_ts(o_n.op_type, domain2opset[o_n.domain], o_n.domain)
+                t_sch = t_s.schema
+                ins = [values[n] for n in o_n.input]
+                for idx in range(len(ins), len(t_sch.arguments)):
+                    arg = t_sch.arguments[idx]
+                    if arg.name in o_attr_vals:
+                        ins.append(o_attr_vals[arg.name])
+                    elif arg.has_default_value():
+                        ins.append(arg.default_value)
+                    else:
+                        raise RuntimeError(f"{arg} not provided")
+                outs = t_s(*ins)
+                if not isinstance(outs, (tuple, list)):
+                    outs = (outs,)
 
-        for t_a_idx, (t_a, t_i) in enumerate(zip(t_sch.arguments, t_g.inputs())):
-            if t_a.kwarg_only:
-                t_v = ret.insertConstant(o_attr_vals[t_a.name])
-                t_v.setDebugName(f"{o_n.name}_{t_i.debugName()}")
-                t_values[t_i.debugName()] = t_v.debugName()
-                values[t_v.debugName()] = t_v
-            elif t_a_idx >= len(o_n.input):
-                t_v = ret.insertConstant(t_a.default_value)
-                t_v.setDebugName(f"{o_n.name}_{t_a.name}")
-                t_values[t_i.debugName()] = t_v.debugName()
-                values[t_v.debugName()] = t_v
+                for n, o in zip(o_n.output, outs):
+                    assert n not in values
+                    values[n] = o
 
-        for t_n in t_g.nodes():
-            ins = [values[t_values[t_i.debugName()]] for t_i in t_n.inputs()]
-            op_name = t_n.kind()
-            c = ret.create(op_name, ins, len(list(t_n.outputs())))
-            _copy_node(c, t_n, t_values, values)
-            for c_o, t_o in zip(c.outputs(), t_n.outputs()):
-                c_o.setDebugName(f"{o_n.name}_{t_n.kind().split('::')[-1]}_{t_o.debugName()}")
-                values[c_o.debugName()] = c_o
-                t_values[t_o.debugName()] = c_o.debugName()
-                c_o.setType(t_o.type())
-            ret.insertNode(c)
+            ret = tuple([values[i.name] for i in model.graph.output])
+            if len(ret) == 1:
+                return ret[0]
+            return ret
 
-        for o_o, t_o in zip(o_n.output, t_g.outputs()):
-            if o_o in model_output_names:
-                values[o_o] = values[t_values[t_o.debugName()]]
+    m = OnnxModule()
+    t = torch.jit.trace(m, args, check_trace=False)
 
-    for v in model.graph.output:
-        ret.registerOutput(values[v.name])
-
-    return ret
+    return t

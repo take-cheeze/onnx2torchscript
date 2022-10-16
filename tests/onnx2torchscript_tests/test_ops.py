@@ -14,18 +14,18 @@ def run_op_test(f: Callable, *args, opset_version: int = 11):
     tmp = tempfile.NamedTemporaryFile()
     torch.onnx.export(M(), args, tmp.name, opset_version=opset_version)
     m: onnx.ModelProto = onnx.load_model(tmp.name)
-    ts = o2t.onnx2ts(m)
-    torch._C._jit_pass_lint(ts)
-    ts_f = torch._C._create_function_from_graph(m.graph.name, ts)
-    assert torch.allclose(M()(*args), ts_f(*args))
+    ts = o2t.onnx2ts(m, args)
+    call_func_count = 0
+    for n in ts.graph.nodes():
+        if n.kind() == "prim::CallFunction":
+            call_func_count += 1
+    assert call_func_count == len(m.graph.node)
+    assert torch.allclose(M()(*args), ts(*args))
 
 def test_add():
     run_op_test(lambda a, b: a + b, torch.randn(10), torch.randn(10))
 
 def test_gemm():
-    # o2t.onnx2torchscript.get_onnx_op("Gemm", 11)(
-    #     torch.randn(10, 10), torch.randn(10, 10),
-    #     alpha=1.0, beta=1.0, transA=0, transB=0)
     run_op_test(
         lambda a, b: torch.mm(a, b),
         torch.randn(10, 10), torch.randn(10, 10))
