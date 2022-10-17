@@ -10,7 +10,7 @@ _op_table: Dict[int, Dict[str, torch._C.ScriptFunction]] = {}
 _version_cache: Dict[Tuple[str, int], torch._C.ScriptFunction] = {}
 
 
-def onnx_op(op_type: str, opset_version: int = 0, domain = "") -> Callable:
+def onnx_op(op_type: str, opset_version: int = 0, domain: str = "") -> Callable:
     def fn(f: Callable) -> Callable:
         ret = torch.jit.script(f)
         _op_table.setdefault(opset_version, {})
@@ -21,14 +21,45 @@ def onnx_op(op_type: str, opset_version: int = 0, domain = "") -> Callable:
     return fn
 
 
-@onnx_op("Add", 1)
-def op_Add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return a + b
+binary_ops = {
+    "Add-1": torch.add,
+    "And-1": torch.logical_and,
+    "BitwiseAnd-18": torch.bitwise_and,
+    "BitwiseOr-18": torch.bitwise_xor,
+    "Greater-1": torch.greater,
+    "Less-1": torch.less,
+    "Mul-1": torch.mul,
+    # "Pow-1": torch.pow,
+    "Sub-1": torch.sub,
+}
 
+for k, o in binary_ops.items():
+    op_type, ver = k.split('-')
+    @onnx_op(op_type, int(ver))
+    def op(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return o(x, y)
 
-@onnx_op("Mul", 1)
-def op_Mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return a * b
+unary_ops = {
+    "Abs-1": torch.abs,
+    "Acos-7": torch.acos,
+    "Acosh-9": torch.acosh,
+    "Ceil-1": torch.ceil,
+    "Log-1": torch.log,
+    "Neg-1": torch.neg,
+    "Not-1": torch.logical_not,
+    "Reciprocal-1": torch.reciprocal,
+    "Sign-9": torch.sign,
+    "Sin-7": torch.sin,
+    "Sinh-9": torch.sinh,
+    "Tan-7": torch.tan,
+    "Tanh-9": torch.tanh,
+}
+
+for k, o in unary_ops.items():
+    op_type, ver = k.split('-')
+    @onnx_op(op_type, int(ver))
+    def op(x: torch.Tensor) -> torch.Tensor:
+        return o(x)
 
 
 @onnx_op("Gemm", 11)
@@ -55,18 +86,18 @@ def op_Constant(
     return value
 
 
-def get_onnx_ts(op_type: str, opset_version: int = 0, domain: str = "") -> torch._C.ScriptFunction:
+def get_onnx_ts(op_type: str, opset_version: int = 0, domain: str = "") -> Optional[torch._C.ScriptFunction]:
     k = (op_type, opset_version)
     if k in _version_cache:
         return _version_cache[k]
 
     if opset_version <= 0:
         opset_version = onnx.defs.onnx_opset_version()
-    while opset_version not in _op_table or \
-            op_type not in _op_table[opset_version]:
+    while not(opset_version in _op_table and \
+            op_type in _op_table[opset_version]):
         opset_version -= 1
         if opset_version == 0:
-            raise NotImplementedError(f"{domain}::{op_type}-{opset_version} not found")
+            return None
         continue
 
     ret = _version_cache[k] = _op_table[opset_version][op_type]
@@ -112,10 +143,12 @@ def onnx2ts(model: onnx.ModelProto, args: Any, verbose: bool = False) -> torch._
 
                     attr_value = onnx.helper.get_attribute_value(o_a)
                     if o_a.type == onnx.AttributeProto.AttributeType.TENSOR:
-                        attr_value = torch.from_numpy(onnx.numpy_helper.to_array(attr_value))
+                        attr_value = torch.from_numpy(onnx.numpy_helper.to_array(attr_value).copy())
                     o_attr_vals[name] = attr_value
 
                 t_s = get_onnx_ts(o_n.op_type, domain2opset[o_n.domain], o_n.domain)
+                if t_s is None:
+                    raise NotImplementedError(f"{o_n.domain}::{o_n.op_type}-{domain2opset[o_n.domain]} not found")
                 t_sch = t_s.schema
                 ins = [values[n] for n in o_n.input]
                 for idx in range(len(ins), len(t_sch.arguments)):
