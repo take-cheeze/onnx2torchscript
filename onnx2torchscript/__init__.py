@@ -1,1 +1,1 @@
-from .onnx2torchscript import onnx_op, onnx2ts
+from .onnx2torchscript import get_onnx_ts, onnx_op, onnx2ts
