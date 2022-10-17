@@ -1,7 +1,8 @@
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Set, Tuple
 import onnx2torchscript as o2t
 
 import torch
+import numpy as np
 import onnx
 import onnx.backend.test
 import tempfile
@@ -61,26 +62,42 @@ def test_initializer():
 
 
 class TorchScriptBackendRep(BackendRep):
-    def __init__(self, ts: torch._C.ScriptFunction):
+    def __init__(self, model: onnx.ModelProto):
         super().__init__()
-        self.ts = ts
+        self.model = model
 
     def run(self, inputs: Any, **kwargs) -> Tuple[Any, ...]:
-        ins = [torch.from_numpy(i.copy()) for i in inputs]
+        ins = []
+        for i in inputs:
+            if isinstance(i, np.ndarray):
+                ins.append(torch.from_numpy(i.copy()))
+            elif isinstance(i, list):
+                ins.append([torch.from_numpy(j.copy()) for j in i])
+            else:
+                raise f"Unsupported input: {i}"
+        self.ts = o2t.onnx2ts(self.model, ins)
         ret = self.ts(*ins)
         if not isinstance(ret, (list, tuple)):
             ret = (ret,)
-        return tuple([t.numpy() for t in ret])
+        return tuple([t.detach().numpy() for t in ret])
+
+
+_to_torch_dtype: Dict[int, torch.dtype] = {
+    onnx.TensorProto.DataType.FLOAT: torch.float,
+    onnx.TensorProto.DataType.UINT8: torch.uint8,
+    onnx.TensorProto.DataType.INT8: torch.int8,
+    onnx.TensorProto.DataType.INT16: torch.int16,
+    onnx.TensorProto.DataType.INT32: torch.int32,
+    onnx.TensorProto.DataType.INT64: torch.int64,
+    onnx.TensorProto.DataType.DOUBLE: torch.double,
+    onnx.TensorProto.DataType.BOOL: torch.bool,
+}
 
 
 class TorchScriptBackend(Backend):
     @classmethod
     def prepare(cls, model: onnx.ModelProto, device: str, **kwargs):
-        args = []
-        for i in model.graph.input:
-            shape = [s.dim_value for s in i.type.tensor_type.shape.dim]
-            args.append(torch.rand(shape))
-        return TorchScriptBackendRep(o2t.onnx2ts(model, args))
+        return TorchScriptBackendRep(model)
 
     @classmethod
     def is_compatible(cls, model: onnx.ModelProto, device: str = "CPU", **kwargs: Any) -> bool:
@@ -104,5 +121,17 @@ class TorchScriptBackend(Backend):
 
 backend_test = onnx.backend.test.runner.Runner(TorchScriptBackend, __name__)
 backend_test.xfail("test_operator_non_float_params")
+backend_test.xfail("uint16")
+backend_test.xfail("uint32")
+backend_test.xfail("uint64")
+backend_test.xfail("test_div_uint8")
+backend_test.xfail("test_reshape_zero")
+backend_test.xfail("test_identity_opt")
+backend_test.xfail("test_identity_sequence")
+backend_test.exclude("test_arg.*_select_last_index")
+backend_test.exclude("test_BatchNorm")
+backend_test.exclude("test_batchnorm_.*training_mode")
+backend_test.exclude("conv_with_autopad_same")
+backend_test.exclude("conv_with_strides_and_asymmetric_padding")
 
 globals().update(backend_test.enable_report().test_cases)

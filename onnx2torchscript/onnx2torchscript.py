@@ -1,5 +1,4 @@
-from ast import Call
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import onnx
 import onnx.numpy_helper
@@ -26,11 +25,15 @@ binary_ops = {
     "And-1": torch.logical_and,
     "BitwiseAnd-18": torch.bitwise_and,
     "BitwiseOr-18": torch.bitwise_xor,
+    "Div-1": torch.true_divide,
+    "Equal-1": torch.eq,
     "Greater-1": torch.greater,
     "Less-1": torch.less,
+    "MatMul-1": torch.matmul,
     "Mul-1": torch.mul,
-    # "Pow-1": torch.pow,
+    "Or-7": torch.logical_or,
     "Sub-1": torch.sub,
+    "Xor-1": torch.logical_xor,
 }
 
 for k, o in binary_ops.items():
@@ -43,16 +46,29 @@ unary_ops = {
     "Abs-1": torch.abs,
     "Acos-7": torch.acos,
     "Acosh-9": torch.acosh,
+    "Asin-7": torch.asin,
+    "Asinh-9": torch.asinh,
+    "Atan-7": torch.atan,
+    "Atanh-9": torch.atanh,
     "Ceil-1": torch.ceil,
+    "Cos-7": torch.cos,
+    "Cosh-9": torch.cosh,
+    "Det-11": torch.det,
+    "Exp-1": torch.exp,
+    "Floor-1": torch.floor,
+    "IsNaN-9": torch.isnan,
     "Log-1": torch.log,
     "Neg-1": torch.neg,
     "Not-1": torch.logical_not,
     "Reciprocal-1": torch.reciprocal,
+    "Relu-1": torch.relu,
+    "Round-11": torch.round,
     "Sign-9": torch.sign,
     "Sin-7": torch.sin,
     "Sinh-9": torch.sinh,
+    "Sqrt-1": torch.sqrt,
     "Tan-7": torch.tan,
-    "Tanh-9": torch.tanh,
+    "Tanh-1": torch.tanh,
 }
 
 for k, o in unary_ops.items():
@@ -62,7 +78,7 @@ for k, o in unary_ops.items():
         return o(x)
 
 
-@onnx_op("Gemm", 11)
+@onnx_op("Gemm", 1)
 def op_Gemm(
     a: torch.Tensor, b: torch.Tensor, c: Optional[torch.Tensor] = None,
     # *,  # Commenting out due to kwargs unsupported in trace mode
@@ -84,6 +100,168 @@ def op_Constant(
     value: torch.Tensor
 ) -> torch.Tensor:
     return value
+
+
+@onnx_op("Conv", 1)
+def op_Conv(
+    x: torch.Tensor, w: torch.Tensor, b: Optional[torch.Tensor] = None,
+    # *,
+    dilations: Optional[List[int]] = None,  group: int = 1, kernel_shape: Optional[List[int]] = None,
+    pads: Optional[List[int]] = None, strides: Optional[List[int]] = None,
+) -> torch.Tensor:
+    if dilations is None:
+        dilations = [1]
+    if strides is None:
+        strides = [1]
+    if pads is None:
+        pads = [0]
+    elif all([p == pads[0] for p in pads]):
+        pads = [pads[0]]
+    return torch.convolution(
+        x, w, b,
+        stride=strides, padding=pads, dilation=dilations, groups=group, 
+        transposed=False, output_padding=[0])
+
+
+@onnx_op("BatchNormalization", 1)
+def op_BatchNorm(
+    x: torch.Tensor, scale: torch.Tensor, b: torch.Tensor,
+    input_mean: torch.Tensor, input_var: torch.Tensor,
+    # *,
+    epsilon: float = 1e-05, momentum: float = 0.9, training_mode: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    return torch.native_batch_norm(
+        x, scale, b, input_mean, input_var, 
+        training=training_mode != 0, momentum=momentum, eps=epsilon)
+
+
+@onnx_op("Softmax", 1)
+def op_Softmax(
+    x: torch.Tensor,
+    # *,
+    axis: int = -1
+) -> torch.Tensor:
+    return torch.softmax(x, dim=axis)
+
+
+@onnx_op("LogSoftmax", 1)
+def op_LogSoftmax(
+    x: torch.Tensor,
+    # *,
+    axis: int = -1
+) -> torch.Tensor:
+    return torch.log_softmax(x, dim=axis)
+
+
+@onnx_op("Trilu", 14)
+def op_Trilu(
+    input: torch.Tensor,
+    k: Optional[torch.Tensor] = None,
+    # *,
+    upper: int = 1
+) -> torch.Tensor:
+    if k is None:
+        k = torch.scalar_tensor(0)
+    if upper:
+        return torch.triu(input, diagonal=k.item())
+    else:
+        return torch.tril(input, diagonal=k.item())
+
+
+@onnx_op("Where", 9)
+def op_Where(cond: torch.Tensor, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.where(cond != 0, x, y)
+
+
+@onnx_op("TopK", 1)
+def op_TopK(
+    x: torch.Tensor, k: torch.Tensor,
+    # *,
+    axis: int = -1, largest: int = 1, sorted: int = 1,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    return torch.topk(x, k.item(), dim=axis, largest=largest != 0, sorted=sorted != 0)
+
+
+OnnxAny = Union[torch.Tensor, List[torch.Tensor], Optional[torch.Tensor]]
+
+@onnx_op("Identity", 1)
+def op_Identity(input: OnnxAny) -> OnnxAny:
+    return input
+
+
+@onnx_op("Reshape", 1)
+def op_Reshape(
+    data: torch.Tensor, shape: torch.Tensor,
+    # *,
+    allowzero: int = 0
+) -> torch.Tensor:
+    return torch.reshape(data, torch.jit.annotate(List[int], shape.tolist()))
+
+
+@onnx_op("BitShift", 11)
+def op_BitShift(
+    x: torch.Tensor, y: torch.Tensor,
+    # *,
+    direction: str,
+) -> torch.Tensor:
+    if direction == "LEFT":
+        return torch.bitwise_left_shift(x, y)
+    else:
+        assert direction == "RIGHT"
+        return torch.bitwise_right_shift(x, y)
+
+
+@onnx_op("Shape", 1)
+def op_Shape(
+    data: torch.Tensor,
+    # *,
+    end: Optional[int] = None, start: int = 0,
+) -> torch.Tensor:
+    s = data.shape
+    if end is None:
+        end = len(s)
+    return torch.tensor(s[start:end])
+
+
+@onnx_op("Transpose", 1)
+def op_Transpose(
+    data: torch.Tensor,
+    # *,
+    perm: Optional[List[int]] = None,
+) -> torch.Tensor:
+    if perm is None:
+        l = list(range(data.dim()))
+        l.reverse()
+        return data.permute(l)
+    return torch.permute(data, perm)
+
+
+@onnx_op("Tile", 1)
+def op_Tile(input: torch.Tensor, repeats: torch.Tensor) -> torch.Tensor:
+    return torch.tile(input, torch.jit.annotate(List[int], repeats.tolist()))
+
+
+@onnx_op("Pow", 1)
+def op_Pow(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.pow(x, y).to(x.dtype)
+
+
+@onnx_op("ArgMax", 1)
+def op_ArgMax(
+    data: torch.Tensor,
+    # *,
+    axis: int = 0, keepdims: int = 1, select_last_index: int = 0,
+) -> torch.Tensor:
+    return torch.argmax(data, dim=axis, keepdim=keepdims != 0)
+
+
+@onnx_op("ArgMin", 1)
+def op_ArgMin(
+    data: torch.Tensor,
+    # *,
+    axis: int = 0, keepdims: int = 1, select_last_index: int = 0,
+) -> torch.Tensor:
+    return torch.argmin(data, dim=axis, keepdim=keepdims != 0)
 
 
 def get_onnx_ts(op_type: str, opset_version: int = 0, domain: str = "") -> Optional[torch._C.ScriptFunction]:
