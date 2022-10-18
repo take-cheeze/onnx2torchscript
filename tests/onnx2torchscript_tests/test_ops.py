@@ -136,6 +136,8 @@ class TorchScriptBackend(Backend):
             return True
         elif _has_mps and device == "CUDA":
             return True
+        elif torch.cuda.is_available() and device =="CUDA":
+            return True
         return False
 
 
@@ -177,5 +179,8 @@ if _has_mps:
     backend_test.exclude("test_operator_add_size1_singleton_broadcast_cuda")
     backend_test.exclude("test_operator_addconstant_cuda")
     backend_test.exclude("test_operator_mm_cuda")
+    backend_test.exclude("test_einsum.*_cuda")
+    backend_test.exclude("float64")
+    backend_test.exclude("test_.*int8_cuda")
 
 globals().update(backend_test.enable_report().test_cases)

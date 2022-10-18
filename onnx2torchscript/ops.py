@@ -251,3 +251,44 @@ def op_ArgMin(
 @onnx_op("Size", 1)
 def op_Size(data: Tensor) -> Tensor:
     return torch.scalar_tensor(data.numel(), dtype=torch.int64)
+
+
+@onnx_op("Einsum", 12)
+def op_Einsum(
+    inputs: List[Tensor],
+    # *,
+    equation: str,
+) -> Tensor:
+    return torch.einsum(equation, inputs)
+
+
+@onnx_op("Max", 1)
+def op_Max(inputs: List[Tensor]) -> Tensor:
+    ret = inputs[0]
+    for i in inputs[1:]:
+        ret = torch.maximum(ret, i)
+    return ret
+
+
+@onnx_op("Min", 1)
+def op_Min(inputs: List[Tensor]) -> Tensor:
+    ret = inputs[0]
+    for i in inputs[1:]:
+        ret = torch.minimum(ret, i)
+    return ret
+
+
+@onnx_op("Mean", 1)
+def op_Mean(inputs: List[Tensor]) -> Tensor:
+    ret = inputs[0]
+    for i in inputs[1:]:
+        ret = ret + i
+    return ret / len(inputs)
+
+
+@onnx_op("Sum", 1)
+def op_Sum(inputs: List[Tensor]) -> Tensor:
+    ret = inputs[0]
+    for i in inputs[1:]:
+        ret = ret + i
+    return ret
