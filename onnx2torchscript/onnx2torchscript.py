@@ -78,7 +78,10 @@ def onnx2ts(model: onnx.ModelProto, args: Any, verbose: bool = False) -> torch._
                     attr_value = onnx.helper.get_attribute_value(o_a)
                     if o_a.type == onnx.AttributeProto.AttributeType.TENSOR:
                         attr_value = torch.from_numpy(onnx.numpy_helper.to_array(attr_value).copy())
-                    o_attr_vals[name] = attr_value
+                        self.register_buffer(o_n.output[0], attr_value, persistent=False)
+                        o_attr_vals[name] = attr_value
+                    else:
+                        o_attr_vals[name] = attr_value
 
                 t_s = get_onnx_ts(o_n.op_type, domain2opset[o_n.domain], o_n.domain)
                 if t_s is None:

@@ -62,9 +62,20 @@ def test_initializer():
 
 
 class TorchScriptBackendRep(BackendRep):
-    def __init__(self, model: onnx.ModelProto):
+    def __init__(self, model: onnx.ModelProto, device: str):
         super().__init__()
         self.model = model
+        if device == "CUDA":
+            if torch.backends.mps.is_available():
+                self.device = "mps"
+            else:
+                assert torch.backends.cuda.is_avaiable()
+                self.device = "cuda"
+        else:
+            assert device == "CPU"
+            self.device = "cpu"
+
+        self.device = torch.device(self.device)
 
     def run(self, inputs: Any, **kwargs) -> Tuple[Any, ...]:
         ins = []
@@ -76,10 +87,13 @@ class TorchScriptBackendRep(BackendRep):
             else:
                 raise f"Unsupported input: {i}"
         self.ts = o2t.onnx2ts(self.model, ins)
+        self.ts.to(device=self.device)
+        ins = [i.to(self.device) for i in ins]
         ret = self.ts(*ins)
         if not isinstance(ret, (list, tuple)):
             ret = (ret,)
-        return tuple([t.detach().numpy() for t in ret])
+        return tuple([t.detach().cpu().numpy() for t in ret])
+    
 
 
 _to_torch_dtype: Dict[int, torch.dtype] = {
@@ -97,7 +111,7 @@ _to_torch_dtype: Dict[int, torch.dtype] = {
 class TorchScriptBackend(Backend):
     @classmethod
     def prepare(cls, model: onnx.ModelProto, device: str, **kwargs):
-        return TorchScriptBackendRep(model)
+        return TorchScriptBackendRep(model, device)
 
     @classmethod
     def is_compatible(cls, model: onnx.ModelProto, device: str = "CPU", **kwargs: Any) -> bool:
@@ -108,6 +122,7 @@ class TorchScriptBackend(Backend):
         for n in model.graph.node:
             s = o2t.get_onnx_ts(n.op_type, domain2opset[n.domain], n.domain)
             if s is None:
+                # print(n.op_type)
                 return False
 
         return True
@@ -115,6 +130,8 @@ class TorchScriptBackend(Backend):
     @classmethod
     def supports_device(cls, device: str) -> bool:
         if device == "CPU":
+            return True
+        elif torch.backends.mps.is_available() and device == "CUDA":
             return True
         return False
 
@@ -133,5 +150,29 @@ backend_test.exclude("test_BatchNorm")
 backend_test.exclude("test_batchnorm_.*training_mode")
 backend_test.exclude("conv_with_autopad_same")
 backend_test.exclude("conv_with_strides_and_asymmetric_padding")
+
+if torch.backends.mps.is_available():
+    backend_test.exclude("test_and.*_cuda")
+    backend_test.exclude("test_arg.*_cuda")
+    backend_test.exclude("test_det.*_cuda")
+    backend_test.exclude("test_not.*_cuda")
+    backend_test.exclude("test_or.*_cuda")
+    backend_test.exclude("test_greater_equal.*_cuda")
+    backend_test.exclude("test_less_equal.*_cuda")
+    backend_test.exclude("test_gemm_.*_bias_cuda")
+    backend_test.exclude("test_pow_.*_cuda")
+    backend_test.exclude("test_round.*_cuda")
+    backend_test.exclude("test_xor.*_cuda")
+    backend_test.exclude("test_tri[lu]_zero_cuda")
+    backend_test.exclude("test_Conv1d_dilated_cuda")
+    backend_test.exclude("test_Conv1d_stride_cuda")
+    backend_test.exclude("test_Conv3d.*_cuda")
+    backend_test.exclude("test_PoissonNLLLLoss_no_reduce_cuda")
+    backend_test.exclude("test_operator_add_broadcast_cuda")
+    backend_test.exclude("test_operator_add_size1_broadcast_cuda")
+    backend_test.exclude("test_operator_add_size1_right_broadcast_cuda")
+    backend_test.exclude("test_operator_add_size1_singleton_broadcast_cuda")
+    backend_test.exclude("test_operator_addconstant_cuda")
+    backend_test.exclude("test_operator_mm_cuda")
 
 globals().update(backend_test.enable_report().test_cases)
