@@ -1,5 +1,6 @@
 from onnx2torchscript import onnx_op
 from typing import Callable, Dict, List, Optional, Union, Tuple
+from torch import Tensor
 import torch
 
 
@@ -22,7 +23,7 @@ binary_ops: Dict[str, Callable] = {
 for k, o in binary_ops.items():
     op_type, ver = k.split('-')
     @onnx_op(op_type, int(ver))
-    def op(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def op(x: Tensor, y: Tensor) -> Tensor:
         return o(x, y)
 
 unary_ops: Dict[str, Callable] = {
@@ -57,16 +58,16 @@ unary_ops: Dict[str, Callable] = {
 for k, o in unary_ops.items():
     op_type, ver = k.split('-')
     @onnx_op(op_type, int(ver))
-    def op(x: torch.Tensor) -> torch.Tensor:
+    def op(x: Tensor) -> Tensor:
         return o(x)
 
 
 @onnx_op("Gemm", 1)
 def op_Gemm(
-    a: torch.Tensor, b: torch.Tensor, c: Optional[torch.Tensor] = None,
+    a: Tensor, b: Tensor, c: Optional[Tensor] = None,
     # *,  # Commenting out due to kwargs unsupported in trace mode
     alpha: float = 1.0, beta: float = 1.0, transA: int = 0, transB: int = 0
-) -> torch.Tensor:
+) -> Tensor:
     if transA:
         a = a.swapaxes(-1, -2)
     if transB:
@@ -80,18 +81,18 @@ def op_Gemm(
 @onnx_op("Constant", 1)
 def op_Constant(
     # *,
-    value: torch.Tensor
-) -> torch.Tensor:
+    value: Tensor
+) -> Tensor:
     return value
 
 
 @onnx_op("Conv", 1)
 def op_Conv(
-    x: torch.Tensor, w: torch.Tensor, b: Optional[torch.Tensor] = None,
+    x: Tensor, w: Tensor, b: Optional[Tensor] = None,
     # *,
     dilations: Optional[List[int]] = None,  group: int = 1, kernel_shape: Optional[List[int]] = None,
     pads: Optional[List[int]] = None, strides: Optional[List[int]] = None,
-) -> torch.Tensor:
+) -> Tensor:
     if dilations is None:
         dilations = [1]
     if strides is None:
@@ -108,11 +109,11 @@ def op_Conv(
 
 @onnx_op("BatchNormalization", 1)
 def op_BatchNorm(
-    x: torch.Tensor, scale: torch.Tensor, b: torch.Tensor,
-    input_mean: torch.Tensor, input_var: torch.Tensor,
+    x: Tensor, scale: Tensor, b: Tensor,
+    input_mean: Tensor, input_var: Tensor,
     # *,
     epsilon: float = 1e-05, momentum: float = 0.9, training_mode: int = 0,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     return torch.native_batch_norm(
         x, scale, b, input_mean, input_var, 
         training=training_mode != 0, momentum=momentum, eps=epsilon)
@@ -120,29 +121,29 @@ def op_BatchNorm(
 
 @onnx_op("Softmax", 1)
 def op_Softmax(
-    x: torch.Tensor,
+    x: Tensor,
     # *,
     axis: int = -1
-) -> torch.Tensor:
+) -> Tensor:
     return torch.softmax(x, dim=axis)
 
 
 @onnx_op("LogSoftmax", 1)
 def op_LogSoftmax(
-    x: torch.Tensor,
+    x: Tensor,
     # *,
     axis: int = -1
-) -> torch.Tensor:
+) -> Tensor:
     return torch.log_softmax(x, dim=axis)
 
 
 @onnx_op("Trilu", 14)
 def op_Trilu(
-    input: torch.Tensor,
-    k: Optional[torch.Tensor] = None,
+    input: Tensor,
+    k: Optional[Tensor] = None,
     # *,
     upper: int = 1
-) -> torch.Tensor:
+) -> Tensor:
     if k is None:
         k = torch.scalar_tensor(0)
     if upper:
@@ -152,20 +153,20 @@ def op_Trilu(
 
 
 @onnx_op("Where", 9)
-def op_Where(cond: torch.Tensor, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+def op_Where(cond: Tensor, x: Tensor, y: Tensor) -> Tensor:
     return torch.where(cond != 0, x, y)
 
 
 @onnx_op("TopK", 1)
 def op_TopK(
-    x: torch.Tensor, k: torch.Tensor,
+    x: Tensor, k: Tensor,
     # *,
     axis: int = -1, largest: int = 1, sorted: int = 1,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[Tensor, Tensor]:
     return torch.topk(x, k.item(), dim=axis, largest=largest != 0, sorted=sorted != 0)
 
 
-OnnxAny = Union[torch.Tensor, List[torch.Tensor], Optional[torch.Tensor]]
+OnnxAny = Union[Tensor, List[Tensor], Optional[Tensor]]
 
 @onnx_op("Identity", 1)
 def op_Identity(input: OnnxAny) -> OnnxAny:
@@ -174,19 +175,19 @@ def op_Identity(input: OnnxAny) -> OnnxAny:
 
 @onnx_op("Reshape", 1)
 def op_Reshape(
-    data: torch.Tensor, shape: torch.Tensor,
+    data: Tensor, shape: Tensor,
     # *,
     allowzero: int = 0
-) -> torch.Tensor:
+) -> Tensor:
     return torch.reshape(data, torch.jit.annotate(List[int], shape.tolist()))
 
 
 @onnx_op("BitShift", 11)
 def op_BitShift(
-    x: torch.Tensor, y: torch.Tensor,
+    x: Tensor, y: Tensor,
     # *,
     direction: str,
-) -> torch.Tensor:
+) -> Tensor:
     if direction == "LEFT":
         return torch.bitwise_left_shift(x, y)
     else:
@@ -196,10 +197,10 @@ def op_BitShift(
 
 @onnx_op("Shape", 1)
 def op_Shape(
-    data: torch.Tensor,
+    data: Tensor,
     # *,
     end: Optional[int] = None, start: int = 0,
-) -> torch.Tensor:
+) -> Tensor:
     s = data.shape
     if end is None:
         end = len(s)
@@ -208,10 +209,10 @@ def op_Shape(
 
 @onnx_op("Transpose", 1)
 def op_Transpose(
-    data: torch.Tensor,
+    data: Tensor,
     # *,
     perm: Optional[List[int]] = None,
-) -> torch.Tensor:
+) -> Tensor:
     if perm is None:
         l = list(range(data.dim()))
         l.reverse()
@@ -220,28 +221,28 @@ def op_Transpose(
 
 
 @onnx_op("Tile", 1)
-def op_Tile(input: torch.Tensor, repeats: torch.Tensor) -> torch.Tensor:
+def op_Tile(input: Tensor, repeats: Tensor) -> Tensor:
     return torch.tile(input, torch.jit.annotate(List[int], repeats.tolist()))
 
 
 @onnx_op("Pow", 1)
-def op_Pow(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+def op_Pow(x: Tensor, y: Tensor) -> Tensor:
     return torch.pow(x, y).to(x.dtype)
 
 
 @onnx_op("ArgMax", 1)
 def op_ArgMax(
-    data: torch.Tensor,
+    data: Tensor,
     # *,
     axis: int = 0, keepdims: int = 1, select_last_index: int = 0,
-) -> torch.Tensor:
+) -> Tensor:
     return torch.argmax(data, dim=axis, keepdim=keepdims != 0)
 
 
 @onnx_op("ArgMin", 1)
 def op_ArgMin(
-    data: torch.Tensor,
+    data: Tensor,
     # *,
     axis: int = 0, keepdims: int = 1, select_last_index: int = 0,
-) -> torch.Tensor:
+) -> Tensor:
     return torch.argmin(data, dim=axis, keepdim=keepdims != 0)
