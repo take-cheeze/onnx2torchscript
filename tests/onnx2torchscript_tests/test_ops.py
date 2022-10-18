@@ -96,19 +96,6 @@ class TorchScriptBackendRep(BackendRep):
         if not isinstance(ret, (list, tuple)):
             ret = (ret,)
         return tuple([t.detach().cpu().numpy() for t in ret])
-    
-
-
-_to_torch_dtype: Dict[int, torch.dtype] = {
-    onnx.TensorProto.DataType.FLOAT: torch.float,
-    onnx.TensorProto.DataType.UINT8: torch.uint8,
-    onnx.TensorProto.DataType.INT8: torch.int8,
-    onnx.TensorProto.DataType.INT16: torch.int16,
-    onnx.TensorProto.DataType.INT32: torch.int32,
-    onnx.TensorProto.DataType.INT64: torch.int64,
-    onnx.TensorProto.DataType.DOUBLE: torch.double,
-    onnx.TensorProto.DataType.BOOL: torch.bool,
-}
 
 
 class TorchScriptBackend(Backend):
@@ -146,6 +133,8 @@ backend_test.xfail("test_operator_non_float_params")
 backend_test.xfail("uint16")
 backend_test.xfail("uint32")
 backend_test.xfail("uint64")
+backend_test.xfail("BFLOAT16")
+backend_test.xfail("STRING")
 backend_test.xfail("test_div_uint8")
 backend_test.xfail("test_reshape_zero")
 backend_test.xfail("test_identity_opt")
@@ -155,6 +144,9 @@ backend_test.exclude("test_BatchNorm")
 backend_test.exclude("test_batchnorm_.*training_mode")
 backend_test.exclude("conv_with_autopad_same")
 backend_test.exclude("conv_with_strides_and_asymmetric_padding")
+backend_test.exclude("test_prelu_broadcast")
+backend_test.exclude("test_prelu_example")
+backend_test.exclude("FLOAT16")
 
 if _has_mps:
     backend_test.exclude("test_and.*_cuda")
@@ -182,5 +174,15 @@ if _has_mps:
     backend_test.exclude("test_einsum.*_cuda")
     backend_test.exclude("float64")
     backend_test.exclude("test_.*int8_cuda")
+    backend_test.exclude("test_mod.*_cuda")
+    backend_test.exclude("test_prelu.*_cuda")
+    backend_test.exclude("test_PReLU.*_cuda")
+    backend_test.exclude("test_reduce_max.*_cuda")
+    backend_test.exclude("test_reduce_min.*_cuda")
+    backend_test.exclude("test_logsoftmax.*expanded_cuda")
+    backend_test.exclude("test_softmax.*expanded_cuda")
+    backend_test.exclude("test_clip.*_cuda")
+    backend_test.exclude("test_operator_clip_cuda")
+    backend_test.exclude("DOUBLE")
 
 globals().update(backend_test.enable_report().test_cases)
