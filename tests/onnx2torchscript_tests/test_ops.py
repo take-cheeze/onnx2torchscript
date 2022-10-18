@@ -61,12 +61,15 @@ def test_initializer():
     assert len(m.graph.initializer) == 1
 
 
+_has_mps: bool = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+
 class TorchScriptBackendRep(BackendRep):
     def __init__(self, model: onnx.ModelProto, device: str):
         super().__init__()
         self.model = model
         if device == "CUDA":
-            if torch.backends.mps.is_available():
+            if _has_mps:
                 self.device = "mps"
             else:
                 assert torch.backends.cuda.is_avaiable()
@@ -131,7 +134,7 @@ class TorchScriptBackend(Backend):
     def supports_device(cls, device: str) -> bool:
         if device == "CPU":
             return True
-        elif torch.backends.mps.is_available() and device == "CUDA":
+        elif _has_mps and device == "CUDA":
             return True
         return False
 
@@ -151,7 +154,7 @@ backend_test.exclude("test_batchnorm_.*training_mode")
 backend_test.exclude("conv_with_autopad_same")
 backend_test.exclude("conv_with_strides_and_asymmetric_padding")
 
-if torch.backends.mps.is_available():
+if _has_mps:
     backend_test.exclude("test_and.*_cuda")
     backend_test.exclude("test_arg.*_cuda")
     backend_test.exclude("test_det.*_cuda")
