@@ -136,6 +136,8 @@ class TorchScriptBackend(Backend):
             return True
         elif _has_mps and device == "CUDA":
             return True
+        elif torch.cuda.is_available() and device =="CUDA":
+            return True
         return False
 
 
