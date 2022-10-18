@@ -88,6 +88,8 @@ def onnx2ts(model: onnx.ModelProto, args: Any, verbose: bool = False) -> torch._
                     raise NotImplementedError(f"{o_n.domain}::{o_n.op_type}-{domain2opset[o_n.domain]} not found")
                 t_sch = t_s.schema
                 ins = [values[n] for n in o_n.input]
+                if len(o_sch.inputs) == 1 and o_sch.inputs[0].option == onnx.defs.OpSchema.FormalParameterOption.Variadic:
+                    ins = [ins]
                 for idx in range(len(ins), len(t_sch.arguments)):
                     arg = t_sch.arguments[idx]
                     if arg.name in o_attr_vals:
