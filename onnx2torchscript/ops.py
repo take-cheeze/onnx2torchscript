@@ -246,3 +246,8 @@ def op_ArgMin(
     axis: int = 0, keepdims: int = 1, select_last_index: int = 0,
 ) -> Tensor:
     return torch.argmin(data, dim=axis, keepdim=keepdims != 0)
+
+
+@onnx_op("Size", 1)
+def op_Size(data: Tensor) -> Tensor:
+    return torch.scalar_tensor(data.numel(), dtype=torch.int64)
