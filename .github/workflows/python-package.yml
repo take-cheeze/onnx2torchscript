@@ -59,7 +59,7 @@ jobs:
         pip install -v -e .[test]
     - name: Test with pytest
       run: |
-        pytest
+        pytest --durations=10
 
   lint:
     runs-on: "ubuntu-latest"
