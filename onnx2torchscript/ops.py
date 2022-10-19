@@ -1,5 +1,3 @@
-from math import ceil
-from optparse import Option
 from typing import Callable, Dict, List, Optional, Union, Tuple
 from torch import Tensor
 from onnx2torchscript import onnx_op
@@ -111,6 +109,30 @@ def op_Conv(
         x, w, b,
         stride=strides, padding=pads, dilation=dilations, groups=group, 
         transposed=False, output_padding=[0])
+
+
+@onnx_op("ConvTranspose", 1)
+def op_ConvTranspose(
+    x: Tensor, w: Tensor, b: Optional[Tensor] = None,
+    # *,
+    dilations: Optional[List[int]] = None,  group: int = 1, kernel_shape: Optional[List[int]] = None,
+    pads: Optional[List[int]] = None, strides: Optional[List[int]] = None,
+    output_padding: Optional[List[int]] = None,
+) -> Tensor:
+    if dilations is None:
+        dilations = [1]
+    if strides is None:
+        strides = [1]
+    if pads is None:
+        pads = [0]
+    elif all([p == pads[0] for p in pads]):
+        pads = [pads[0]]
+    if output_padding is None:
+        output_padding = [0]
+    return torch.convolution(
+        x, w, b,
+        stride=strides, padding=pads, dilation=dilations, groups=group, 
+        transposed=True, output_padding=output_padding)
 
 
 @onnx_op("BatchNormalization", 1)
@@ -704,3 +726,79 @@ def op_MaxPool(
             dilation=dilations,
             return_indices=True,
             ceil_mode=ceil_mode != 0)
+
+
+@onnx_op("SequenceEmpty", 11)
+def op_SequneceEmpty(
+    # *,
+) -> List[Tensor]:
+    return torch.jit.annotate(List[Tensor], [])
+
+
+@onnx_op("LeakyRelu", 1)
+def op_LeakyRelu(
+    x: Tensor,
+    # *,
+    alpha: float = 0.01
+) -> Tensor:
+    return torch.where(x >= 0, x, x * alpha)
+
+
+@onnx_op("LayerNormalization", 17)
+def op_LayerNormalization(
+    x: Tensor, scale: Tensor, b: Optional[Tensor] = None,
+    # *,
+    axis: int = -1, epsilon: float = 1e-5, stash_type: int = 1
+) -> Tuple[Tensor, Tensor, Tensor]:
+    s: List[int] = []
+    if axis < 0:
+        axis = x.dim() + axis
+    for i in range(axis, x.dim()):
+        s.append(x.shape[i])
+
+    return torch.native_layer_norm(x, normalized_shape=s, weight=scale, bias=b, eps=epsilon)
+
+
+@onnx_op("ConstantOfShape", 9)
+def op_ConstantOfShape(
+    input: Tensor,
+    # *,
+    value: Optional[Tensor] = None
+) -> Tensor:
+    if value is None:
+        value = torch.scalar_tensor(0.0)
+    return value.expand(torch.jit.annotate(List[int], input.tolist()))
+
+
+@onnx_op("CumSum", 11)
+def op_CumSum(
+    x: Tensor, axis: Tensor,
+    # *,
+    exclusive: int = 0, reverse: int = 0,
+) -> Tensor:
+    assert exclusive == 0
+    assert reverse == 0
+    return torch.cumsum(x, axis.item())
+
+
+@onnx_op("InstanceNormalization", 1)
+def op_InstanceNormalization(
+    input: Tensor, scale: Tensor, b: Tensor,
+    # *,
+    epsilon: float = 1e-5,
+) -> Tensor:
+    return torch.instance_norm(
+        input, weight=scale, bias=b,
+        running_mean=None, running_var=None, use_input_stats=True,
+        momentum=0.0, cudnn_enabled=True,
+        eps=epsilon)
+
+
+@onnx_op("Softplus", 1)
+def op_Softplus(x: Tensor) -> Tensor:
+    return torch.log(torch.exp(x) + 1)
+
+
+@onnx_op("CastLike", 15)
+def op_CastLike(input: Tensor, target_type: Tensor) -> Tensor:
+    return target_type.to(dtype=input.dtype)

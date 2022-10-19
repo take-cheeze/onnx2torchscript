@@ -153,6 +153,12 @@ xfails = [
     "test_maxpool_with_argmax_2d_precomputed_strides",
     "test_inception_v2",
     "test_MaxPool3d_stride_padding_cpu",
+    "test_convtranspose_autopad_same",
+    "test_convtranspose_output_shape",
+    "test_convtranspose_pads_",
+    "test_cumsum_1d_exclusive",
+    "test_cumsum_1d_reverse_exclusive",
+    "test_cumsum_1d_reverse",
 ]
 
 excludes = [
@@ -213,7 +219,14 @@ if _has_mps:
         "test_AvgPool3d.*_cuda",
         "test_MaxPool3d.*_cuda",
         "test_maxpool_3d_default_cuda",
-        "test_gridsample.*_cuda"
+        "test_gridsample.*_cuda",
+        "test_convtranspose_3d_cuda",
+        "test_ConvTranspose2d.*_cuda",
+        "test_convtranspose_pad_cuda",
+        "test_convtranspose_kernel_shape_cuda",
+        "test_convtranspose_with_kernel_cuda",
+        "test_cumsum.*_cuda",
+        "test_unique.*_cuda",
     ]
 
 for x in xfails:
