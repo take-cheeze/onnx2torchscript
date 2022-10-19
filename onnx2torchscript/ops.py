@@ -1,6 +1,8 @@
-from onnx2torchscript import onnx_op
+from math import ceil
+from optparse import Option
 from typing import Callable, Dict, List, Optional, Union, Tuple
 from torch import Tensor
+from onnx2torchscript import onnx_op
 import torch
 import onnx
 
@@ -26,6 +28,7 @@ for k, o in binary_ops.items():
     @onnx_op(op_type, int(ver))
     def op(x: Tensor, y: Tensor) -> Tensor:
         return o(x, y)
+    op.__nmae__ = f"op_{op_type}_{ver}"
 
 unary_ops: Dict[str, Callable] = {
     "Abs-1": torch.abs,
@@ -62,6 +65,7 @@ for k, o in unary_ops.items():
     @onnx_op(op_type, int(ver))
     def op(x: Tensor) -> Tensor:
         return o(x)
+    op.__nmae__ = f"op_{op_type}_{ver}"
 
 
 @onnx_op("Gemm", 1)
@@ -551,3 +555,143 @@ def op_Compress(
         input = torch.flatten(input)
         axis = 0
     return torch.index_select(input, dim=axis, index=torch.nonzero(condition).squeeze())
+
+
+@onnx_op("GlobalMaxPool", 1)
+def op_GlobalMaxPool(x: Tensor) -> Tensor:
+    dims = torch.jit.annotate(List[int], [])
+    for i in range(x.dim() - 2):
+        dims.append(i + 2)
+    return torch.amax(x, dim=dims, keepdim=True)
+
+
+@onnx_op("GlobalAveragePool", 1)
+def op_GlobalAveragePool(x: Tensor) -> Tensor:
+    dims = torch.jit.annotate(List[int], [])
+    for i in range(x.dim() - 2):
+        dims.append(i + 2)
+    return torch.mean(x, dim=dims, keepdim=True)
+
+
+@onnx_op("IsInf", 10)
+def op_IsInf(
+    x: Tensor,
+    # *,
+    detect_negative: int = 1, detect_positive: int = 1,
+) -> Tensor:
+    ret = torch.isinf(x)
+    if detect_positive != 0 and detect_negative == 0:
+        return torch.logical_and((x > 0), ret)
+    if detect_positive == 0 and detect_negative != 0:
+        return torch.logical_and((x < 0), ret)
+    return ret
+
+
+@onnx_op("GridSample, 16")
+def op_GridSample(
+    x: Tensor, grid: Tensor,
+    # *,
+    align_corners: int = 0, mode: str = "bilinear",
+    padding_mode: str = "zeros",
+) -> Tensor:
+    # ref: aten/src/ATen/native/GridSamplerUtils.h
+    i = 0
+    if mode == "bilinear":
+        i = 0
+    elif mode == "nearest":
+        i = 1
+    else:
+        assert mode == "bicubic"
+        i = 2
+    p = 0
+    if padding_mode == "zeros":
+        p = 0
+    elif padding_mode == "border":
+        p = 1
+    else:
+        assert padding_mode == "reflection"
+        p = 2
+    return torch.grid_sampler(
+        x, grid,
+        interpolation_mode=i, padding_mode=p,
+        align_corners=align_corners != 0)
+
+
+@onnx_op("AveragePool", 1)
+def op_AveragePool(
+    x: Tensor,
+    # *,
+    ceil_mode: int = 0, count_include_pad: int = 0,
+    kernel_shape: Optional[List[int]] = None,
+    pads: Optional[List[int]] = None,
+    strides: Optional[List[int]] = None,
+) -> Tensor:
+    assert kernel_shape is not None
+    if strides is None:
+        strides = [1]
+    if pads is None:
+        pads = [0]
+    else:
+        for i in range(len(kernel_shape)):
+            assert pads[i] ==  pads[i + len(kernel_shape)]
+        pads = pads[0:len(kernel_shape)]
+
+    if len(kernel_shape) == 1:
+        return torch.nn.functional.avg_pool1d(
+            x, kernel_shape, stride=strides, padding=pads,
+            count_include_pad=count_include_pad != 0,
+            ceil_mode=ceil_mode != 0)
+    elif len(kernel_shape) == 2:
+        return torch.nn.functional.avg_pool2d(
+            x, kernel_shape, stride=strides, padding=pads,
+            count_include_pad=count_include_pad != 0,
+            ceil_mode=ceil_mode != 0)
+    else:
+        assert len(kernel_shape) == 3
+        return torch.nn.functional.avg_pool3d(
+            x, kernel_shape, stride=strides, padding=pads,
+            count_include_pad=count_include_pad != 0,
+            ceil_mode=ceil_mode != 0)
+
+
+@onnx_op("MaxPool", 1)
+def op_MaxPool(
+    x: Tensor,
+    # *,
+    ceil_mode: int = 0, count_include_pad: int = 0,
+    dilations: Optional[List[int]] = None,
+    kernel_shape: Optional[List[int]] = None,
+    pads: Optional[List[int]] = None,
+    strides: Optional[List[int]] = None,
+) -> Tuple[Tensor, Tensor]:
+    assert kernel_shape is not None
+    if strides is None:
+        strides = [1]
+    if pads is None:
+        pads = [0]
+    else:
+        for i in range(len(kernel_shape)):
+            assert pads[i] ==  pads[i + len(kernel_shape)]
+        pads = pads[0:len(kernel_shape)]
+    if dilations is None:
+        dilations = [1]
+
+    if len(kernel_shape) == 1:
+        return torch.nn.functional.max_pool1d(
+            x, kernel_shape, stride=strides, padding=pads,
+            dilation=dilations,
+            return_indices=True,
+            ceil_mode=ceil_mode != 0)
+    elif len(kernel_shape) == 2:
+        return torch.nn.functional.max_pool2d(
+            x, kernel_shape, stride=strides, padding=pads,
+            dilation=dilations,
+            return_indices=True,
+            ceil_mode=ceil_mode != 0)
+    else:
+        assert len(kernel_shape) == 3
+        return torch.nn.functional.max_pool3d(
+            x, kernel_shape, stride=strides, padding=0,
+            dilation=dilations,
+            return_indices=True,
+            ceil_mode=ceil_mode != 0)
