@@ -113,6 +113,30 @@ def op_Conv(
         transposed=False, output_padding=[0])
 
 
+@onnx_op("ConvTranspose", 1)
+def op_ConvTranspose(
+    x: Tensor, w: Tensor, b: Optional[Tensor] = None,
+    # *,
+    dilations: Optional[List[int]] = None,  group: int = 1, kernel_shape: Optional[List[int]] = None,
+    pads: Optional[List[int]] = None, strides: Optional[List[int]] = None,
+    output_padding: Optional[List[int]] = None,
+) -> Tensor:
+    if dilations is None:
+        dilations = [1]
+    if strides is None:
+        strides = [1]
+    if pads is None:
+        pads = [0]
+    elif all([p == pads[0] for p in pads]):
+        pads = [pads[0]]
+    if output_padding is None:
+        output_padding = [0]
+    return torch.convolution(
+        x, w, b,
+        stride=strides, padding=pads, dilation=dilations, groups=group, 
+        transposed=True, output_padding=output_padding)
+
+
 @onnx_op("BatchNormalization", 1)
 def op_BatchNorm(
     x: Tensor, scale: Tensor, b: Tensor,
@@ -512,6 +536,36 @@ def op_Concat(
     return torch.concat(inputs, dim=axis)
 
 
+@onnx_op("Squeeze", 13)
+def op_Squeeze_13(data: Tensor, axes: Optional[Tensor] = None) -> Tensor:
+    if axes is None:
+        return torch.squeeze(data)
+    axes_list = torch.jit.annotate(List[int], axes.tolist())
+    axes_list = [a if a >= 0 else a + data.dim() for a in axes_list]
+    s = data.shape
+    for a in sorted(axes_list):
+        assert s[a] == 1
+        del s[a]
+    return torch.reshape(data, s)
+
+
+@onnx_op("Squeeze", 1)
+def op_Squeeze_1(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None
+) -> Tensor:
+    if axes is None:
+        return torch.squeeze(data)
+    axes_list = axes
+    axes_list = [a if a >= 0 else a + data.dim() for a in axes_list]
+    s = data.shape
+    for a in sorted(axes_list):
+        assert s[a] == 1
+        del s[a]
+    return torch.reshape(data, s)
+
+
 @onnx_op("Unsqueeze", 13)
 def op_Unsqueeze_13(data: Tensor, axes: Tensor) -> Tensor:
     axes_list = torch.jit.annotate(List[int], axes.tolist())
@@ -596,7 +650,7 @@ def op_IsInf(
     return ret
 
 
-@onnx_op("GridSample, 16")
+@onnx_op("GridSample", 16)
 def op_GridSample(
     x: Tensor, grid: Tensor,
     # *,
@@ -704,3 +758,199 @@ def op_MaxPool(
             dilation=dilations,
             return_indices=True,
             ceil_mode=ceil_mode != 0)
+
+
+@onnx_op("SequenceEmpty", 11)
+def op_SequneceEmpty(
+    # *,
+) -> List[Tensor]:
+    return torch.jit.annotate(List[Tensor], [])
+
+
+@onnx_op("LeakyRelu", 1)
+def op_LeakyRelu(
+    x: Tensor,
+    # *,
+    alpha: float = 0.01
+) -> Tensor:
+    return torch.where(x >= 0, x, x * alpha)
+
+
+@onnx_op("LayerNormalization", 17)
+def op_LayerNormalization(
+    x: Tensor, scale: Tensor, b: Optional[Tensor] = None,
+    # *,
+    axis: int = -1, epsilon: float = 1e-5, stash_type: int = 1
+) -> Tuple[Tensor, Tensor, Tensor]:
+    s: List[int] = []
+    if axis < 0:
+        axis = x.dim() + axis
+    for i in range(axis, x.dim()):
+        s.append(x.shape[i])
+
+    return torch.native_layer_norm(x, normalized_shape=s, weight=scale, bias=b, eps=epsilon)
+
+
+@onnx_op("ConstantOfShape", 9)
+def op_ConstantOfShape(
+    input: Tensor,
+    # *,
+    value: Optional[Tensor] = None
+) -> Tensor:
+    if value is None:
+        value = torch.scalar_tensor(0.0)
+    return value.expand(torch.jit.annotate(List[int], input.tolist()))
+
+
+@onnx_op("CumSum", 11)
+def op_CumSum(
+    x: Tensor, axis: Tensor,
+    # *,
+    exclusive: int = 0, reverse: int = 0,
+) -> Tensor:
+    assert exclusive == 0
+    assert reverse == 0
+    return torch.cumsum(x, axis.item())
+
+
+@onnx_op("InstanceNormalization", 1)
+def op_InstanceNormalization(
+    input: Tensor, scale: Tensor, b: Tensor,
+    # *,
+    epsilon: float = 1e-5,
+) -> Tensor:
+    return torch.instance_norm(
+        input, weight=scale, bias=b,
+        running_mean=None, running_var=None, use_input_stats=True,
+        momentum=0.0, cudnn_enabled=True,
+        eps=epsilon)
+
+
+@onnx_op("Softplus", 1)
+def op_Softplus(x: Tensor) -> Tensor:
+    return torch.log(torch.exp(x) + 1)
+
+
+@onnx_op("CastLike", 15)
+def op_CastLike(input: Tensor, target_type: Tensor) -> Tensor:
+    return input.to(dtype=target_type.dtype)
+
+
+@onnx_op("Selu", 1)
+def op_Selu(
+    x: Tensor,
+    # *,
+    alpha: float = 1.67326, gamma: float = 1.0507,
+) -> Tensor:
+    return torch.where(
+        x <= 0,
+        gamma * (alpha * torch.exp(x) - alpha),
+        gamma * x)
+
+
+@onnx_op("ThresholdedRelu", 10)
+def op_ThresholdedRelu(
+    x: Tensor,
+    # *,
+    alpha: float = 1.0
+) -> Tensor:
+    return torch.where(x > alpha, x, torch.zeros_like(x))
+
+
+@onnx_op("HardSigmoid", 6)
+def op_HardSigmoid(
+    x: Tensor,
+    # *,
+    alpha: float = 0.2, beta: float = 0.4
+) -> Tensor:
+    return torch.clamp(alpha * x + beta, 0, 1)
+
+
+@onnx_op("HardSwish", 14)
+def op_HardSwish(x: Tensor) -> Tensor:
+    return x * op_HardSigmoid(x, alpha=1.0 / 6, beta=0.5)
+
+
+@onnx_op("Expand", 1)
+def op_Expannd(input: Tensor, shape: Tensor) -> Tensor:
+    t = torch.jit.annotate(List[int], shape.tolist())
+    f = input.shape
+
+    if len(t) > len(f):
+        t, f = f, t
+    offset = len(f) - len(t)
+    ex: List[int] = []
+    for idx in range(len(f)):
+        ex.append(max(f[idx], t[idx - offset] if idx >= offset else 1))
+
+    return input.expand(ex)
+
+
+@onnx_op("Split", 13)
+def op_Split_13(
+    input: Tensor, split: Optional[Tensor] = None,
+    # *,
+    axis: int = 0, num_outputs: Optional[int] = None,
+    _num_outputs: int = 0,  # Special argument name
+) -> List[Tensor]:
+    if split is None:
+        if num_outputs is None:
+            num_outputs = _num_outputs
+        return torch.split(input, int(ceil(input.size(axis) / num_outputs)), dim=axis)
+    else:
+        return torch.split(input, torch.jit.annotate(List[int], split.tolist()), dim=axis)
+
+
+@onnx_op("Split", 1)
+def op_Split_1(
+    input: Tensor,
+    # *,
+    axis: int = 0, split: Optional[List[int]] = None,
+    _num_outputs: int = 0,  # Special argument name
+) -> List[Tensor]:
+    if split is None:
+        num_outputs = _num_outputs
+        return torch.split(input, int(ceil(input.size(axis) / num_outputs)), dim=axis)
+    else:
+        return torch.split(input, split, dim=axis)
+
+
+@onnx_op("Flatten", 1)
+def op_Flatten(
+    input: Tensor,
+    # *,
+    axis: int = 1,
+) -> Tensor:
+    if axis < 0:
+        axis += input.dim()
+    s = [1, 1]
+    for i in range(axis):
+        s[0] *= input.size(i)
+    for i in range(axis, input.dim()):
+        s[1] *= input.size(i)
+    return torch.reshape(input, s)
+
+
+@onnx_op("Shrink", 9)
+def op_Shrink(
+    x: Tensor,
+    # *,
+    bias: float = 0.0, lambd: float = 0.5
+) -> Tensor:
+    return torch.where(
+        x < -lambd,
+        x + bias,
+        torch.where(
+            x > lambd,
+            x - bias,
+            torch.zeros_like(x)))
+
+
+@onnx_op("Softsign", 1)
+def op_Softsign(x: Tensor) -> Tensor:
+    return x / (1 + torch.abs(x))
+
+
+@onnx_op("NonZero", 9)
+def op_NonZero(x: Tensor) -> Tensor:
+    return torch.nonzero(x).transpose(0, 1)
