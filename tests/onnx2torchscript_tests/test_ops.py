@@ -112,7 +112,7 @@ class TorchScriptBackend(Backend):
         for n in model.graph.node:
             s = o2t.get_onnx_ts(n.op_type, domain2opset[n.domain], n.domain)
             if s is None:
-                # print(n.op_type)
+                print(n.op_type)
                 return False
 
         return True
@@ -129,60 +129,95 @@ class TorchScriptBackend(Backend):
 
 
 backend_test = onnx.backend.test.runner.Runner(TorchScriptBackend, __name__)
-backend_test.xfail("test_operator_non_float_params")
-backend_test.xfail("uint16")
-backend_test.xfail("uint32")
-backend_test.xfail("uint64")
-backend_test.xfail("BFLOAT16")
-backend_test.xfail("STRING")
-backend_test.xfail("test_div_uint8")
-backend_test.xfail("test_reshape_zero")
-backend_test.xfail("test_identity_opt")
-backend_test.xfail("test_identity_sequence")
-backend_test.exclude("test_arg.*_select_last_index")
-backend_test.exclude("test_BatchNorm")
-backend_test.exclude("test_batchnorm_.*training_mode")
-backend_test.exclude("conv_with_autopad_same")
-backend_test.exclude("conv_with_strides_and_asymmetric_padding")
-backend_test.exclude("test_prelu_broadcast")
-backend_test.exclude("test_prelu_example")
-backend_test.exclude("FLOAT16")
+
+xfails = [
+    "uint16",
+    "uint32",
+    "uint64",
+    "BFLOAT16",
+    "STRING",
+    "test_div_uint8",
+    "test_reshape_zero",
+    "test_identity_opt",
+    "test_identity_sequence",
+    "test_averagepool_2d_pads_count_include_pad_cpu",
+    "test_averagepool_2d_pads_cpu",
+    "test_averagepool_2d_precomputed_same_upper_cpu",
+    "test_averagepool_2d_same_lower_cpu",
+    "test_averagepool_2d_same_upper_cpu",
+    "test_maxpool_2d_uint8_cpu",
+    "test_maxpool_2d_precomputed_same_upper",
+    "test_maxpool_2d_pads",
+    "test_maxpool_2d_same_lower",
+    "test_maxpool_2d_same_upper",
+    "test_maxpool_with_argmax_2d_precomputed_strides",
+    "test_inception_v2",
+    "test_MaxPool3d_stride_padding_cpu",
+]
+
+excludes = [
+    "test_arg.*_select_last_index",
+    "test_BatchNorm",
+    "test_batchnorm_.*training_mode",
+    "conv_with_autopad_same",
+    "conv_with_strides_and_asymmetric_padding",
+    "test_prelu_broadcast",
+    "test_prelu_example",
+    "FLOAT16",
+    "test_strnorm",
+    "test_tfidf",
+    "test_resnet50_",
+    "test_densenet121_",
+]
 
 if _has_mps:
-    backend_test.exclude("test_and.*_cuda")
-    backend_test.exclude("test_arg.*_cuda")
-    backend_test.exclude("test_det.*_cuda")
-    backend_test.exclude("test_not.*_cuda")
-    backend_test.exclude("test_or.*_cuda")
-    backend_test.exclude("test_greater_equal.*_cuda")
-    backend_test.exclude("test_less_equal.*_cuda")
-    backend_test.exclude("test_gemm_.*_bias_cuda")
-    backend_test.exclude("test_pow_.*_cuda")
-    backend_test.exclude("test_round.*_cuda")
-    backend_test.exclude("test_xor.*_cuda")
-    backend_test.exclude("test_tri[lu]_zero_cuda")
-    backend_test.exclude("test_Conv1d_dilated_cuda")
-    backend_test.exclude("test_Conv1d_stride_cuda")
-    backend_test.exclude("test_Conv3d.*_cuda")
-    backend_test.exclude("test_PoissonNLLLLoss_no_reduce_cuda")
-    backend_test.exclude("test_operator_add_broadcast_cuda")
-    backend_test.exclude("test_operator_add_size1_broadcast_cuda")
-    backend_test.exclude("test_operator_add_size1_right_broadcast_cuda")
-    backend_test.exclude("test_operator_add_size1_singleton_broadcast_cuda")
-    backend_test.exclude("test_operator_addconstant_cuda")
-    backend_test.exclude("test_operator_mm_cuda")
-    backend_test.exclude("test_einsum.*_cuda")
-    backend_test.exclude("float64")
-    backend_test.exclude("test_.*int8_cuda")
-    backend_test.exclude("test_mod.*_cuda")
-    backend_test.exclude("test_prelu.*_cuda")
-    backend_test.exclude("test_PReLU.*_cuda")
-    backend_test.exclude("test_reduce_max.*_cuda")
-    backend_test.exclude("test_reduce_min.*_cuda")
-    backend_test.exclude("test_logsoftmax.*expanded_cuda")
-    backend_test.exclude("test_softmax.*expanded_cuda")
-    backend_test.exclude("test_clip.*_cuda")
-    backend_test.exclude("test_operator_clip_cuda")
-    backend_test.exclude("DOUBLE")
+    excludes += [
+        "test_and.*_cuda",
+        "test_arg.*_cuda",
+        "test_det.*_cuda",
+        "test_not.*_cuda",
+        "test_or.*_cuda",
+        "test_greater_equal.*_cuda",
+        "test_less_equal.*_cuda",
+        "test_gemm_.*_bias_cuda",
+        "test_pow_.*_cuda",
+        "test_round.*_cuda",
+        "test_xor.*_cuda",
+        "test_tri[lu]_zero_cuda",
+        "test_Conv1d_dilated_cuda",
+        "test_Conv1d_stride_cuda",
+        "test_Conv3d.*_cuda",
+        "test_PoissonNLLLLoss_no_reduce_cuda",
+        "test_operator_add_broadcast_cuda",
+        "test_operator_add_size1_broadcast_cuda",
+        "test_operator_add_size1_right_broadcast_cuda",
+        "test_operator_add_size1_singleton_broadcast_cuda",
+        "test_operator_addconstant_cuda",
+        "test_operator_mm_cuda",
+        "test_einsum.*_cuda",
+        "float64",
+        "test_.*int8_cuda",
+        "test_mod.*_cuda",
+        "test_prelu.*_cuda",
+        "test_PReLU.*_cuda",
+        "test_reduce_max.*_cuda",
+        "test_reduce_min.*_cuda",
+        "test_logsoftmax.*expanded_cuda",
+        "test_softmax.*expanded_cuda",
+        "test_clip.*_cuda",
+        "test_operator_clip_cuda",
+        "DOUBLE",
+        "test_globalmaxpool.*_cuda",
+        "test_isinf.*_cuda",
+        "test_averagepool.*_cuda",
+        "test_AvgPool3d.*_cuda",
+        "test_MaxPool3d.*_cuda",
+        "test_maxpool_3d_default_cuda",
+    ]
+
+for x in xfails:
+    backend_test.xfail(x)
+for x in excludes:
+    backend_test.exclude(x)
 
 globals().update(backend_test.enable_report().test_cases)

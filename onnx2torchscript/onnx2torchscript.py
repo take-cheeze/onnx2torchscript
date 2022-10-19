@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import onnx
 import onnx.numpy_helper
@@ -52,14 +52,25 @@ def onnx2ts(model: onnx.ModelProto, args: Any, verbose: bool = False) -> torch._
             super().__init__()
             for i in model.graph.initializer:
                 p = torch.from_numpy(onnx.numpy_helper.to_array(i).copy())
-                setattr(self, i.name, torch.nn.parameter.Parameter(p))
+                self.register_buffer(i.name, p)
+                # if p.dtype.is_floating_point:
+                #     setattr(self, i.name, torch.nn.parameter.Parameter(p))
+                # else:
+                #     self.register_buffer(i.name, p)
 
         def forward(self, *args):
             values: Dict[str, Any] = {}
-            for a, i in zip(args, model.graph.input):
-                values[i.name] = a
+            initializer_names: Set[str] = set()
             for i in model.graph.initializer:
                 values[i.name] = getattr(self, i.name)
+                initializer_names.add(i.name)
+            input_names: List[str] = []
+            for i in model.graph.input:
+                if i.name not in initializer_names:
+                    input_names.append(i.name)
+            assert len(input_names) == len(args)
+            for a, n in zip(args, input_names):
+                values[n] = a
             for o_n in model.graph.node:
                 o_sch = onnx.defs.get_schema(o_n.op_type, domain2opset[o_n.domain], o_n.domain)
 
