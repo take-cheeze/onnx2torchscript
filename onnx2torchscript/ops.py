@@ -596,7 +596,7 @@ def op_IsInf(
     return ret
 
 
-@onnx_op("GridSample, 16")
+@onnx_op("GridSample", 16)
 def op_GridSample(
     x: Tensor, grid: Tensor,
     # *,

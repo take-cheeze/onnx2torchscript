@@ -213,6 +213,7 @@ if _has_mps:
         "test_AvgPool3d.*_cuda",
         "test_MaxPool3d.*_cuda",
         "test_maxpool_3d_default_cuda",
+        "test_gridsample.*_cuda"
     ]
 
 for x in xfails:
