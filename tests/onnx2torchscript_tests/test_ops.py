@@ -112,7 +112,7 @@ class TorchScriptBackend(Backend):
         for n in model.graph.node:
             s = o2t.get_onnx_ts(n.op_type, domain2opset[n.domain], n.domain)
             if s is None:
-                print(n.op_type)
+                print(n.op_type, domain2opset[n.domain])
                 return False
 
         return True

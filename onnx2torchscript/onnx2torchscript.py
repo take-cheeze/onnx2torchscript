@@ -106,16 +106,28 @@ def onnx2ts(model: onnx.ModelProto, args: Any, verbose: bool = False) -> torch._
                     if arg.name in o_attr_vals:
                         ins.append(o_attr_vals[arg.name])
                     elif arg.has_default_value():
+                        if arg.name == "_num_outputs":
+                            ins.append(len(o_n.output))
+                            continue
                         ins.append(arg.default_value)
                     else:
-                        raise RuntimeError(f"{arg} not provided")
+                        raise RuntimeError(f"{arg.name} not provided")
                 outs = t_s(*ins)
                 if not isinstance(outs, (tuple, list)):
                     outs = (outs,)
 
-                for n, o in zip(o_n.output, outs):
-                    assert n not in values
-                    values[n] = o
+                if len(outs) >= len(o_n.output):
+                    for n, o in zip(o_n.output, outs):
+                        assert n not in values
+                        values[n] = o
+                else:
+                    if len(o_sch.outputs) == 1 and o_sch.outputs[0].option == onnx.defs.OpSchema.FormalParameterOption.Variadic:
+                        assert len(o_n.output) == len(outs)
+                        for n, o in zip(o_n.output, outs):
+                            assert n not in values
+                            values[n] = o
+                    else:
+                        raise RuntimeError(f"Cannot supply outputs: {o_n.output[len(outs):]}")
 
             ret = tuple([values[i.name] for i in model.graph.output])
             if len(ret) == 1:

@@ -1,3 +1,5 @@
+from math import ceil
+from optparse import Option
 from typing import Callable, Dict, List, Optional, Union, Tuple
 from torch import Tensor
 from onnx2torchscript import onnx_op
@@ -534,6 +536,36 @@ def op_Concat(
     return torch.concat(inputs, dim=axis)
 
 
+@onnx_op("Squeeze", 13)
+def op_Squeeze_13(data: Tensor, axes: Optional[Tensor] = None) -> Tensor:
+    if axes is None:
+        return torch.squeeze(data)
+    axes_list = torch.jit.annotate(List[int], axes.tolist())
+    axes_list = [a if a >= 0 else a + data.dim() for a in axes_list]
+    s = data.shape
+    for a in sorted(axes_list):
+        assert s[a] == 1
+        del s[a]
+    return torch.reshape(data, s)
+
+
+@onnx_op("Squeeze", 1)
+def op_Squeeze_1(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None
+) -> Tensor:
+    if axes is None:
+        return torch.squeeze(data)
+    axes_list = axes
+    axes_list = [a if a >= 0 else a + data.dim() for a in axes_list]
+    s = data.shape
+    for a in sorted(axes_list):
+        assert s[a] == 1
+        del s[a]
+    return torch.reshape(data, s)
+
+
 @onnx_op("Unsqueeze", 13)
 def op_Unsqueeze_13(data: Tensor, axes: Tensor) -> Tensor:
     axes_list = torch.jit.annotate(List[int], axes.tolist())
@@ -802,3 +834,123 @@ def op_Softplus(x: Tensor) -> Tensor:
 @onnx_op("CastLike", 15)
 def op_CastLike(input: Tensor, target_type: Tensor) -> Tensor:
     return target_type.to(dtype=input.dtype)
+
+
+@onnx_op("Selu", 1)
+def op_Selu(
+    x: Tensor,
+    # *,
+    alpha: float = 1.67326, gamma: float = 1.0507,
+) -> Tensor:
+    return torch.where(
+        x <= 0,
+        gamma * (alpha * torch.exp(x) - alpha),
+        gamma * x)
+
+
+@onnx_op("ThresholdedRelu", 10)
+def op_ThresholdedRelu(
+    x: Tensor,
+    # *,
+    alpha: float = 1.0
+) -> Tensor:
+    return torch.where(x > alpha, x, 0)
+
+
+@onnx_op("HardSigmoid", 6)
+def op_HardSigmoid(
+    x: Tensor,
+    # *,
+    alpha: float = 0.2, beta: float = 0.4
+) -> Tensor:
+    return torch.clamp(alpha * x + beta, 0, 1)
+
+
+@onnx_op("HardSwish", 14)
+def op_HardSwish(x: Tensor) -> Tensor:
+    return x * op_HardSigmoid(x, alpha=1.0 / 6, beta=0.5)
+
+
+@onnx_op("Expand", 1)
+def op_Expannd(input: Tensor, shape: Tensor) -> Tensor:
+    t = torch.jit.annotate(List[int], shape.tolist())
+    f = input.shape
+
+    if len(t) > len(f):
+        t, f = f, t
+    offset = len(f) - len(t)
+    ex: List[int] = []
+    for idx in range(len(f)):
+        ex.append(max(f[idx], t[idx - offset] if idx >= offset else 1))
+
+    return input.expand(ex)
+
+
+@onnx_op("Split", 13)
+def op_Split_13(
+    input: Tensor, split: Optional[Tensor] = None,
+    # *,
+    axis: int = 0, num_outputs: Optional[int] = None,
+    _num_outputs: int = 0,  # Special argument name
+) -> List[Tensor]:
+    if split is None:
+        if num_outputs is None:
+            num_outputs = _num_outputs
+        return torch.split(input, int(ceil(input.size(axis) / num_outputs)), dim=axis)
+    else:
+        return torch.split(input, torch.jit.annotate(List[int], split.tolist()), dim=axis)
+
+
+@onnx_op("Split", 1)
+def op_Split_1(
+    input: Tensor,
+    # *,
+    axis: int = 0, split: Optional[List[int]] = None,
+    _num_outputs: int = 0,  # Special argument name
+) -> List[Tensor]:
+    if split is None:
+        num_outputs = _num_outputs
+        return torch.split(input, int(ceil(input.size(axis) / num_outputs)), dim=axis)
+    else:
+        return torch.split(input, split, dim=axis)
+
+
+@onnx_op("Flatten", 1)
+def op_Flatten(
+    input: Tensor,
+    # *,
+    axis: int = 1,
+) -> Tensor:
+    if axis < 0:
+        axis += input.dim()
+    s = [1, 1]
+    for i in range(axis):
+        s[0] *= input.size(i)
+    for i in range(axis, input.dim()):
+        s[1] *= input.size(i)
+    return torch.reshape(input, s)
+
+
+@onnx_op("Shrink", 9)
+def op_Shrink(
+    x: Tensor,
+    # *,
+    bias: float = 0.0, lambd: float = 0.5
+) -> Tensor:
+    return torch.where(
+        x < -lambd,
+        x + bias,
+        torch.where(
+            x > lambd,
+            x - bias,
+            torch.zeros_like(x)))
+
+
+@onnx_op("Softsign", 1)
+def op_Softsign(x: Tensor) -> Tensor:
+    return x / (1 + torch.abs(x))
+
+
+@onnx_op("NonZero", 9)
+def op_NonZero(x: Tensor) -> Tensor:
+    return torch.nonzero(x).transpose(0, 1)
