@@ -2,6 +2,7 @@ from onnx2torchscript import onnx_op
 from typing import Callable, Dict, List, Optional, Union, Tuple
 from torch import Tensor
 import torch
+import onnx
 
 
 binary_ops: Dict[str, Callable] = {
@@ -47,6 +48,7 @@ unary_ops: Dict[str, Callable] = {
     "Reciprocal-1": torch.reciprocal,
     "Relu-1": torch.relu,
     "Round-11": torch.round,
+    "Sigmoid-1": torch.sigmoid,
     "Sign-9": torch.sign,
     "Sin-7": torch.sin,
     "Sinh-9": torch.sinh,
@@ -292,3 +294,269 @@ def op_Sum(inputs: List[Tensor]) -> Tensor:
     for i in inputs[1:]:
         ret = ret + i
     return ret
+
+
+@onnx_op("Mod", 1)
+def op_Mod(
+    a: Tensor, b: Tensor,
+    # *,
+    fmod: int = 0,
+) -> Tensor:
+    if fmod:
+        return torch.fmod(a, b)
+    else:
+        return a % b
+
+
+@onnx_op("PRelu", 1)
+def op_PRelu(x: Tensor, slope: Tensor) -> Tensor:
+    return torch.prelu(x, slope)
+
+
+@onnx_op("SequenceLength", 11)
+def op_SequenceLenght(x: List[Tensor]) -> Tensor:
+    return torch.scalar_tensor(len(x), dtype=torch.int64)
+
+
+@onnx_op("ReduceMax", 1)
+def op_ReduceMax(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    if axes is None:
+        ret = torch.max(data)
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        return torch.amax(data, dim=axes, keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceMin", 1)
+def op_ReduceMin(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    if axes is None:
+        ret = torch.min(data)
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        return torch.amin(data, dim=axes, keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceL1", 1)
+def op_ReduceL1(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    data = torch.abs(data)
+    if axes is None:
+        ret = torch.sum(data)
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        return torch.sum(data, dim=axes, keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceL2", 1)
+def op_ReduceL2(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    data = data * data
+    if axes is None:
+        ret = torch.sqrt(torch.sum(data))
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        return torch.sqrt(torch.sum(data, dim=axes, keepdim=keepdims != 0))
+
+
+@onnx_op("ReduceSum", 1)
+def op_ReduceSum_1(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+    noop_with_empty_axes: int = 0,
+) -> Tensor:
+    if axes is None:
+        ret = torch.sum(data)
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        return torch.sum(data, dim=axes, keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceSum", 13)
+def op_ReduceSum_13(
+    data: Tensor,
+    axes: Optional[Tensor] = None,
+    # *,
+    keepdims: int = 1,
+    noop_with_empty_axes: int = 0,
+) -> Tensor:
+    if axes is None:
+        ret = torch.sum(data)
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        if axes.numel() == 0 and noop_with_empty_axes != 0:
+            return data
+        return torch.sum(data, dim=torch.jit.annotate(List[int], axes.tolist()), keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceSumSquare", 1)
+def op_ReduceSumSquare(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    data = data * data
+    if axes is None:
+        ret = torch.sum(data)
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        return torch.sum(data, dim=axes, keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceMean", 1)
+def op_ReduceMean(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    if axes is None:
+        ret = torch.mean(data)
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        return torch.mean(data, dim=axes, keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceProd", 1)
+def op_ReduceProd(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    if axes is None:
+        ret = torch.prod(data)
+        if keepdims != 0:
+            return torch.reshape(ret, [1] * data.dim())
+        else:
+            return ret
+    else:
+        assert len(axes) == 1
+        return torch.prod(data, dim=axes[0], keepdim=keepdims != 0)
+
+
+@onnx_op("Clip", 1)
+def op_Clip_1(
+    input: Tensor,
+    # *,
+    min: float = float("+inf"), max: float = float("-inf"),
+) -> Tensor:
+    return torch.clamp(input, min, max)
+
+
+@onnx_op("Clip", 11)
+def op_Clip_11(input: Tensor, min: Optional[Tensor] = None, max: Optional[Tensor] = None) -> Tensor:
+    if min is not None and max is not None:
+        return torch.clamp(input, min, max)
+    elif min is not None:
+        return torch.clamp_min(input, min)
+    elif max is not None:
+        return torch.clamp_max(input, max)
+    return input
+
+
+@onnx_op("Concat", 1)
+def op_Concat(
+    inputs: List[Tensor],
+    # *,
+    axis: int,
+) -> Tensor:
+    return torch.concat(inputs, dim=axis)
+
+
+@onnx_op("Unsqueeze", 13)
+def op_Unsqueeze_13(data: Tensor, axes: Tensor) -> Tensor:
+    axes_list = torch.jit.annotate(List[int], axes.tolist())
+    axes_list = [a if a >= 0 else a + data.dim() for a in axes_list]
+    ret = data
+    for a in sorted(axes_list):
+        ret = torch.unsqueeze(ret, dim=a)
+    return ret
+
+
+@onnx_op("Unsqueeze", 1)
+def op_Unsqueeze_1(
+    data: Tensor,
+    # *,
+    axes: List[int],
+) -> Tensor:
+    axes_list = [a if a >= 0 else a + data.dim() for a in axes]
+    ret = data
+    for a in sorted(axes_list):
+        ret = torch.unsqueeze(ret, dim=a)
+    return ret
+
+
+@onnx_op("Cast", 1)
+def op_Cast(
+    input: Tensor,
+    # *,
+    to: int,
+) -> Tensor:
+    _to_torch_dtype: Dict[int, torch.dtype] = {
+        1: torch.float,
+        2: torch.uint8,
+        3: torch.int8,
+        5: torch.int16,
+        6: torch.int32,
+        7: torch.int64,
+        11: torch.double,
+        9: torch.bool,
+    }
+    return  input.to(_to_torch_dtype[to])
+
+
+@onnx_op("Compress", 9)
+def op_Compress(
+    input: Tensor, condition: Tensor,
+    # *,
+    axis: Optional[int] = None
+) -> Tensor:
+    if axis is None:
+        input = torch.flatten(input)
+        axis = 0
+    return torch.index_select(input, dim=axis, index=torch.nonzero(condition).squeeze())
