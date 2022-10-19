@@ -480,7 +480,16 @@ def op_ReduceProd(
 
 
 @onnx_op("Clip", 1)
-def op_Clip(input: Tensor, min: Optional[Tensor] = None, max: Optional[Tensor] = None) -> Tensor:
+def op_Clip_1(
+    input: Tensor,
+    # *,
+    min: float = float("+inf"), max: float = float("-inf"),
+) -> Tensor:
+    return torch.clamp(input, min, max)
+
+
+@onnx_op("Clip", 11)
+def op_Clip_11(input: Tensor, min: Optional[Tensor] = None, max: Optional[Tensor] = None) -> Tensor:
     if min is not None and max is not None:
         return torch.clamp(input, min, max)
     elif min is not None:
