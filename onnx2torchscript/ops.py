@@ -833,7 +833,7 @@ def op_Softplus(x: Tensor) -> Tensor:
 
 @onnx_op("CastLike", 15)
 def op_CastLike(input: Tensor, target_type: Tensor) -> Tensor:
-    return target_type.to(dtype=input.dtype)
+    return input.to(dtype=target_type.dtype)
 
 
 @onnx_op("Selu", 1)
@@ -854,7 +854,7 @@ def op_ThresholdedRelu(
     # *,
     alpha: float = 1.0
 ) -> Tensor:
-    return torch.where(x > alpha, x, 0)
+    return torch.where(x > alpha, x, torch.zeros_like(x))
 
 
 @onnx_op("HardSigmoid", 6)
