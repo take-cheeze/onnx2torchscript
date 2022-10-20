@@ -1071,7 +1071,7 @@ else:
     ) -> Tensor:
         indices = torch.where(indices < 0, indices + data.size(axis), indices)
         if reduction is None or reduction == "none":
-            reduction = None
+            return torch.scatter(data, dim=axis, index=indices, src=updates)
         elif reduction == "add":
             reduction = "add"
         else:
