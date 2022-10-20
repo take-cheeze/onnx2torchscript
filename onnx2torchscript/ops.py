@@ -2,6 +2,7 @@ from math import ceil
 from optparse import Option
 from typing import Callable, Dict, List, Optional, Union, Tuple
 from torch import Tensor
+from torch.jit import annotate
 from onnx2torchscript import onnx_op
 import torch
 import onnx
@@ -209,7 +210,7 @@ def op_Reshape(
     # *,
     allowzero: int = 0
 ) -> Tensor:
-    return torch.reshape(data, torch.jit.annotate(List[int], shape.tolist()))
+    return torch.reshape(data, annotate(List[int], shape.tolist()))
 
 
 @onnx_op("BitShift", 11)
@@ -252,7 +253,7 @@ def op_Transpose(
 
 @onnx_op("Tile", 1)
 def op_Tile(input: Tensor, repeats: Tensor) -> Tensor:
-    return torch.tile(input, torch.jit.annotate(List[int], repeats.tolist()))
+    return torch.tile(input, annotate(List[int], repeats.tolist()))
 
 
 @onnx_op("Pow", 1)
@@ -451,7 +452,7 @@ def op_ReduceSum_13(
     else:
         if axes.numel() == 0 and noop_with_empty_axes != 0:
             return data
-        return torch.sum(data, dim=torch.jit.annotate(List[int], axes.tolist()), keepdim=keepdims != 0)
+        return torch.sum(data, dim=annotate(List[int], axes.tolist()), keepdim=keepdims != 0)
 
 
 @onnx_op("ReduceSumSquare", 1)
@@ -540,7 +541,7 @@ def op_Concat(
 def op_Squeeze_13(data: Tensor, axes: Optional[Tensor] = None) -> Tensor:
     if axes is None:
         return torch.squeeze(data)
-    axes_list = torch.jit.annotate(List[int], axes.tolist())
+    axes_list = annotate(List[int], axes.tolist())
     axes_list = [a if a >= 0 else a + data.dim() for a in axes_list]
     s = data.shape
     for a in sorted(axes_list):
@@ -568,7 +569,7 @@ def op_Squeeze_1(
 
 @onnx_op("Unsqueeze", 13)
 def op_Unsqueeze_13(data: Tensor, axes: Tensor) -> Tensor:
-    axes_list = torch.jit.annotate(List[int], axes.tolist())
+    axes_list = annotate(List[int], axes.tolist())
     axes_list = [a if a >= 0 else a + data.dim() for a in axes_list]
     ret = data
     for a in sorted(axes_list):
@@ -622,7 +623,7 @@ def op_Compress(
 
 @onnx_op("GlobalMaxPool", 1)
 def op_GlobalMaxPool(x: Tensor) -> Tensor:
-    dims = torch.jit.annotate(List[int], [])
+    dims = annotate(List[int], [])
     for i in range(x.dim() - 2):
         dims.append(i + 2)
     return torch.amax(x, dim=dims, keepdim=True)
@@ -630,7 +631,7 @@ def op_GlobalMaxPool(x: Tensor) -> Tensor:
 
 @onnx_op("GlobalAveragePool", 1)
 def op_GlobalAveragePool(x: Tensor) -> Tensor:
-    dims = torch.jit.annotate(List[int], [])
+    dims = annotate(List[int], [])
     for i in range(x.dim() - 2):
         dims.append(i + 2)
     return torch.mean(x, dim=dims, keepdim=True)
@@ -764,7 +765,7 @@ def op_MaxPool(
 def op_SequneceEmpty(
     # *,
 ) -> List[Tensor]:
-    return torch.jit.annotate(List[Tensor], [])
+    return annotate(List[Tensor], [])
 
 
 @onnx_op("LeakyRelu", 1)
@@ -799,7 +800,7 @@ def op_ConstantOfShape(
 ) -> Tensor:
     if value is None:
         value = torch.scalar_tensor(0.0)
-    return value.expand(torch.jit.annotate(List[int], input.tolist()))
+    return value.expand(annotate(List[int], input.tolist()))
 
 
 @onnx_op("CumSum", 11)
@@ -873,7 +874,7 @@ def op_HardSwish(x: Tensor) -> Tensor:
 
 @onnx_op("Expand", 1)
 def op_Expannd(input: Tensor, shape: Tensor) -> Tensor:
-    t = torch.jit.annotate(List[int], shape.tolist())
+    t = annotate(List[int], shape.tolist())
     f = input.shape
 
     if len(t) > len(f):
@@ -898,7 +899,7 @@ def op_Split_13(
             num_outputs = _num_outputs
         return torch.split(input, int(ceil(input.size(axis) / num_outputs)), dim=axis)
     else:
-        return torch.split(input, torch.jit.annotate(List[int], split.tolist()), dim=axis)
+        return torch.split(input, annotate(List[int], split.tolist()), dim=axis)
 
 
 @onnx_op("Split", 1)
@@ -971,7 +972,7 @@ def op_SplitToSequence(
         return list(torch.split(input, split.item(), dim=axis))
     else:
         return list(torch.split(
-            input, torch.jit.annotate(List[int], split.tolist()), dim=axis))
+            input, annotate(List[int], split.tolist()), dim=axis))
 
 
 @onnx_op("SequenceInsert", 11)
@@ -984,3 +985,43 @@ def op_SequenceInsert(
         return s
     s.insert(p.item(), t)
     return s
+
+
+@onnx_op("Slice", 10)
+def op_Slice_10(
+    data: Tensor, starts: Tensor, ends: Tensor,
+    axes: Optional[Tensor] = None, steps: Optional[Tensor] = None,
+) -> Tensor:
+    axes_list: List[int] = []
+    assert starts.numel() == ends.numel()
+    if axes is None:
+        axes_list = list(range(starts.numel()))
+    else:
+        axes_list = annotate(List[int], axes.tolist())
+    
+    steps_list: List[int] = []
+    if steps is None:
+        steps_list = [1] * starts.numel()
+    else:
+        assert steps.numel() == starts.numel()
+        steps_list = annotate(List[int], steps.tolist())
+
+    ret = data
+    for a, s, e, step in zip(
+        axes_list,
+        annotate(List[int], starts.tolist()),
+        annotate(List[int], ends.tolist()),
+        steps_list
+    ):
+        if s < 0:
+            s += data.size(a)
+        if e < 0:
+            e += data.size(a)
+        e = min(data.size(a), e)
+        s = min(data.size(a), s)
+        if s > e:
+            s, e = e, s
+            step = -step
+        idx = torch.arange(s, e, step, device=data.device)
+        ret = torch.index_select(ret, dim=a, index=idx)
+    return ret
