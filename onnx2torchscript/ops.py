@@ -1,4 +1,5 @@
 from math import ceil
+from opcode import hasjabs
 from optparse import Option
 from typing import Callable, Dict, List, Optional, Union, Tuple
 from torch import Tensor
@@ -1037,29 +1038,48 @@ def op_Gather(
     return torch.gather(data, dim=axis, index=indices)
 
 
-@onnx_op("ScatterElements", 11)
-def op_ScatterElements(
-    data: Tensor, indices: Tensor, updates: Tensor,
-    # *,
-    axis: int = 0, reduction: Optional[str] = None,
-) -> Tensor:
-    indices = torch.where(indices < 0, indices + data.size(axis), indices)
-    if reduction is None or reduction == "none":
-        return torch.scatter(data, dim=axis, index=indices, src=updates)
+if hasattr(torch, "scatter_reduce"):
+    @onnx_op("ScatterElements", 11)
+    def op_ScatterElements(
+        data: Tensor, indices: Tensor, updates: Tensor,
+        # *,
+        axis: int = 0, reduction: Optional[str] = None,
+    ) -> Tensor:
+        indices = torch.where(indices < 0, indices + data.size(axis), indices)
+        if reduction is None or reduction == "none":
+            return torch.scatter(data, dim=axis, index=indices, src=updates)
 
-    if reduction == "add":
-        reduction = "sum"
-    elif reduction == "mul":
-        reduction = "prod"
-    elif reduction == "mean":
-        reduction = "mean"
-    elif reduction == "max":
-        reduction = "amax"
-    else:
-        assert reduction == "min"
-        reduction = "amin"
-    return torch.scatter_reduce(
-        data, dim=axis, index=indices, src=updates, reduce=reduction)
+        if reduction == "add":
+            reduction = "sum"
+        elif reduction == "mul":
+            reduction = "prod"
+        elif reduction == "mean":
+            reduction = "mean"
+        elif reduction == "max":
+            reduction = "amax"
+        else:
+            assert reduction == "min"
+            reduction = "amin"
+        return torch.scatter_reduce(
+            data, dim=axis, index=indices, src=updates, reduce=reduction)
+else:
+    @onnx_op("ScatterElements", 11)
+    def op_ScatterElements(
+        data: Tensor, indices: Tensor, updates: Tensor,
+        # *,
+        axis: int = 0, reduction: Optional[str] = None,
+    ) -> Tensor:
+        indices = torch.where(indices < 0, indices + data.size(axis), indices)
+        if reduction is None or reduction == "none":
+            reduction = None
+        elif reduction == "add":
+            reduction = "add"
+        elif reduction == "mul":
+            reduction = "multiply"
+
+        return torch.scatter(
+            data, dim=axis, index=indices, src=updates,
+            reduce=reduction)
 
 
 @onnx_op("Scatter", 9)
