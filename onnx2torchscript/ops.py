@@ -1074,7 +1074,8 @@ else:
             reduction = None
         elif reduction == "add":
             reduction = "add"
-        elif reduction == "mul":
+        else:
+            assert reduction == "mul"
             reduction = "multiply"
 
         return torch.scatter(
