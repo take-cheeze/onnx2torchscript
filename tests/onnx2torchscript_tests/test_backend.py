@@ -138,7 +138,7 @@ excludes = [
     "test_resnet50_",
     "test_densenet121_",
     "test_sequence_insert_at_",
-    "test_sequence_model[68]_",
+    "test_sequence_model[12345678]_",
 ]
 
 if _has_mps:

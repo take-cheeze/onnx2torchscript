@@ -1078,17 +1078,17 @@ def op_SequenceAt(input_sequence: List[Tensor], position: Tensor) -> Tensor:
 
 
 @onnx_op("SequenceConstruct", 11)
-def op_SequenceAt(inputs: List[Tensor]) -> List[Tensor]:
+def op_SequenceConstruct(inputs: List[Tensor]) -> List[Tensor]:
     return inputs
 
 
 @onnx_op("SequenceErase", 11)
-def op_SequenceAt(inputs: List[Tensor], position: Optional[Tensor] = None) -> List[Tensor]:
+def op_SequenceErase(inputs: List[Tensor], position: Optional[Tensor] = None) -> List[Tensor]:
     inputs = inputs.copy()
     if position is None:
         del inputs[-1]
-        return 
-    del inputs[position.item()]
+        return inputs
+    del inputs[int(position.item())]
     return inputs
 
 
