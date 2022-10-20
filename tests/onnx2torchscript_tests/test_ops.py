@@ -20,18 +20,26 @@ def run_op_test(
                 return f(*args)
         mod = M()
 
-    tmp = tempfile.NamedTemporaryFile()
-    torch.onnx.export(mod, args, tmp.name, opset_version=opset_version)
-    m: onnx.ModelProto = onnx.load_model(tmp.name)
-    ts = o2t.onnx2ts(m, args)
-    call_func_count = 0
-    for n in ts.graph.nodes():
-        if n.kind() == "prim::CallFunction":
-            call_func_count += 1
-    assert call_func_count == len(m.graph.node)
-    assert torch.allclose(mod(*args), ts(*args))
+    with tempfile.NamedTemporaryFile() as tmp:
+        tmp.close()
+        torch.onnx.export(mod, args, tmp.name, opset_version=opset_version)
+        m: onnx.ModelProto = onnx.load_model(tmp.name)
+        ts = o2t.onnx2ts(m, args)
+        call_func_count = 0
+        for n in ts.graph.nodes():
+            if n.kind() == "prim::CallFunction":
+                call_func_count += 1
+        assert call_func_count == len(m.graph.node)
+        assert torch.allclose(mod(*args), ts(*args))
 
-    return m
+        with tempfile.NamedTemporaryFile() as tmp_mod:
+            tmp_mod.close()
+            print(type(ts))
+            torch.jit.save(ts, tmp_mod.name)
+            ts_reload = torch.jit.load(tmp_mod.name)
+            assert torch.allclose(mod(*args), ts_reload(*args))
+
+        return m
 
 
 def test_add():
