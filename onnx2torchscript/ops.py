@@ -342,7 +342,7 @@ def op_PRelu(x: Tensor, slope: Tensor) -> Tensor:
 
 
 @onnx_op("SequenceLength", 11)
-def op_SequenceLenght(x: List[Tensor]) -> Tensor:
+def op_SequenceLength(x: List[Tensor]) -> Tensor:
     return torch.scalar_tensor(len(x), dtype=torch.int64)
 
 
@@ -954,3 +954,33 @@ def op_Softsign(x: Tensor) -> Tensor:
 @onnx_op("NonZero", 9)
 def op_NonZero(x: Tensor) -> Tensor:
     return torch.nonzero(x).transpose(0, 1)
+
+
+@onnx_op("SplitToSequence", 11)
+def op_SplitToSequence(
+    input: Tensor, split: Optional[Tensor] = None,
+    # *,
+    axis: int = 0, keepdims: int = 1,
+) -> List[Tensor]:
+    if split is None:
+        ret = list(torch.split(input, 1, dim=axis))
+        if keepdims == 0:
+            ret = [op_Squeeze_1(t, [axis]) for t in ret]
+        return ret
+    if split.numel() == 1:
+        return list(torch.split(input, split.item(), dim=axis))
+    else:
+        return list(torch.split(
+            input, torch.jit.annotate(List[int], split.tolist()), dim=axis))
+
+
+@onnx_op("SequenceInsert", 11)
+def op_SequenceInsert(
+    s: List[Tensor], t: Tensor, p: Optional[Tensor] = None,
+) -> List[Tensor]:
+    s = s.copy()
+    if p is None:
+        s.append(t)
+        return s
+    s.insert(p.item(), t)
+    return s

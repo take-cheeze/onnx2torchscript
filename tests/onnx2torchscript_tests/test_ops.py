@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Set, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 import onnx2torchscript as o2t
 
 import torch
@@ -8,10 +8,10 @@ import onnx.backend.test
 import tempfile
 from onnx.backend.base import Backend, BackendRep
 
-from onnx2torchscript.onnx2torchscript import onnx2ts
 
-
-def run_op_test(f: Callable, *args, opset_version: int = 11) -> onnx.ModelProto:
+def run_op_test(
+    f: Callable, *args, opset_version: int = 11
+) -> onnx.ModelProto:
     if isinstance(f, torch.nn.Module):
         mod = f
     else:
@@ -61,7 +61,19 @@ def test_initializer():
     assert len(m.graph.initializer) == 1
 
 
-_has_mps: bool = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+_has_mps: bool = hasattr(torch.backends, "mps") and \
+    torch.backends.mps.is_available()
+
+
+def _move_to(ins: List[Any], device: torch.device) -> List[Any]:
+    ret = []
+    for i in ins:
+        if isinstance(i, list):
+            ret.append(_move_to(i, device))
+        else:
+            assert isinstance(i, torch.Tensor)
+            ret.append(i.to(device))
+    return ret
 
 
 class TorchScriptBackendRep(BackendRep):
@@ -91,7 +103,7 @@ class TorchScriptBackendRep(BackendRep):
                 raise f"Unsupported input: {i}"
         self.ts = o2t.onnx2ts(self.model, ins)
         self.ts.to(device=self.device)
-        ins = [i.to(self.device) for i in ins]
+        ins =  _move_to(ins, self.device)
         ret = self.ts(*ins)
         if not isinstance(ret, (list, tuple)):
             ret = (ret,)
@@ -104,7 +116,9 @@ class TorchScriptBackend(Backend):
         return TorchScriptBackendRep(model, device)
 
     @classmethod
-    def is_compatible(cls, model: onnx.ModelProto, device: str = "CPU", **kwargs: Any) -> bool:
+    def is_compatible(
+        cls, model: onnx.ModelProto, device: str = "CPU", **kwargs: Any
+    ) -> bool:
         domain2opset: Dict[str, int] = {}
         for o in model.opset_import:
             domain2opset[o.domain] = o.version
@@ -112,7 +126,7 @@ class TorchScriptBackend(Backend):
         for n in model.graph.node:
             s = o2t.get_onnx_ts(n.op_type, domain2opset[n.domain], n.domain)
             if s is None:
-                # print(n.op_type, domain2opset[n.domain])
+                print(n.op_type, domain2opset[n.domain])
                 return False
 
         return True
@@ -174,6 +188,8 @@ excludes = [
     "test_tfidf",
     "test_resnet50_",
     "test_densenet121_",
+    "test_sequence_insert_at_",
+    "test_sequence_model[68]_",
 ]
 
 if _has_mps:
