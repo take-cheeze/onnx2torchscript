@@ -34,7 +34,6 @@ def run_op_test(
 
         with tempfile.NamedTemporaryFile() as tmp_mod:
             tmp_mod.close()
-            print(type(ts))
             torch.jit.save(ts, tmp_mod.name)
             ts_reload = torch.jit.load(tmp_mod.name)
             assert torch.allclose(mod(*args), ts_reload(*args))
