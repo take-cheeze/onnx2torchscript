@@ -194,6 +194,8 @@ if _has_mps:
         "test_unique.*_cuda",
         "test_slice_cuda",
         "test_slice_start_out_of_bounds_cuda",
+        "test_nllloss_.*_expanded_cuda",
+        "test_scatter_elements_with_duplicate_indices_cuda",
     ]
 
 for x in xfails:

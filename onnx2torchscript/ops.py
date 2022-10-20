@@ -1025,3 +1025,81 @@ def op_Slice_10(
         idx = torch.arange(s, e, step, device=data.device)
         ret = torch.index_select(ret, dim=a, index=idx)
     return ret
+
+
+@onnx_op("GatherElements", 11)
+def op_Gather(
+    data: Tensor, indices: Tensor,
+    # *,
+    axis: int = 0,
+) -> Tensor:
+    indices = torch.where(indices < 0, indices + data.size(axis), indices)
+    return torch.gather(data, dim=axis, index=indices)
+
+
+@onnx_op("ScatterElements", 11)
+def op_ScatterElements(
+    data: Tensor, indices: Tensor, updates: Tensor,
+    # *,
+    axis: int = 0, reduction: Optional[str] = None,
+) -> Tensor:
+    indices = torch.where(indices < 0, indices + data.size(axis), indices)
+    if reduction is None or reduction == "none":
+        return torch.scatter(data, dim=axis, index=indices, src=updates)
+
+    if reduction == "add":
+        reduction = "sum"
+    elif reduction == "mul":
+        reduction = "prod"
+    elif reduction == "mean":
+        reduction = "mean"
+    elif reduction == "max":
+        reduction = "amax"
+    else:
+        assert reduction == "min"
+        reduction = "amin"
+    return torch.scatter_reduce(
+        data, dim=axis, index=indices, src=updates, reduce=reduction)
+
+
+@onnx_op("Scatter", 9)
+def op_Scatter(
+    data: Tensor, indices: Tensor, updates: Tensor,
+    # *,
+    axis: int = 0, reduction: Optional[str] = None,
+) -> Tensor:
+    return op_ScatterElements(
+        data, indices, updates, axis=axis, reduction=reduction)
+
+
+@onnx_op("SequenceAt", 11)
+def op_SequenceAt(input_sequence: List[Tensor], position: Tensor) -> Tensor:
+    return input_sequence[position.item()]
+
+
+@onnx_op("SequenceConstruct", 11)
+def op_SequenceAt(inputs: List[Tensor]) -> List[Tensor]:
+    return inputs
+
+
+@onnx_op("SequenceErase", 11)
+def op_SequenceAt(inputs: List[Tensor], position: Optional[Tensor] = None) -> List[Tensor]:
+    inputs = inputs.copy()
+    if position is None:
+        del inputs[-1]
+        return 
+    del inputs[position.item()]
+    return inputs
+
+
+@onnx_op("ConcatFromSequence", 11)
+def op_ConcatFromSequence(
+    inputs: List[Tensor],
+    # *,
+    axis: Optional[int] = None, new_axis: int = 0, 
+) -> Tensor:
+    assert axis is not None
+    if new_axis != 0:
+        return torch.stack(inputs, dim=axis)
+    else:
+        return torch.concat(inputs, dim=axis)
