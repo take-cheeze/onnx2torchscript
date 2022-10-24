@@ -196,6 +196,9 @@ if _has_mps:
         "test_slice_start_out_of_bounds_cuda",
         "test_nllloss_.*_expanded_cuda",
         "test_scatter_elements_with_duplicate_indices_cuda",
+        "test_scatternd_cuda",
+        "test_scatternd_add_cuda",
+        "test_scatternd_multiply_cuda",
     ]
 
 for x in xfails:

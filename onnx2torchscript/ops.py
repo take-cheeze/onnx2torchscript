@@ -1124,3 +1124,37 @@ def op_ConcatFromSequence(
         return torch.stack(inputs, dim=axis)
     else:
         return torch.concat(inputs, dim=axis)
+
+
+@onnx_op("ScatterND", 11)
+def op_ScatterND(
+    data: Tensor, indices: Tensor, updates: Tensor,
+    # *,
+    reduction: str = "none",
+) -> Tensor:
+    assert data.dim() >= 1
+    assert indices.dim() > 1
+    assert (data.dim() + indices.dim()) - (indices.shape[-1] + 1)
+    out = data.clone()
+    idx = indices.reshape(-1, indices.shape[-1])
+    nd = torch.tensor([1] + data.shape[0:data.dim() - indices.dim() - 1], device=indices.device).reshape(1, -1)
+    idx = torch.mm(idx, nd).reshape(-1)
+    assert idx.shape[0] == torch.prod(torch.tensor(indices.shape[:-1]))
+    updates = updates.reshape([-1] + updates.shape[indices.dim() - 1:])
+    out = out.reshape([-1] + data.shape[data.dim() - indices.dim():])
+    if reduction == "none":
+        out.index_copy_(dim=0, index=idx, source=updates)
+    elif reduction == "add":
+        out.index_add_(dim=0, index=idx, source=updates)
+    else:
+        if reduction == "mul":
+            reduction = "prod"
+        elif reduction == "min":
+            reduction = "amin"
+        elif reduction == "max":
+            reduction = "amax"
+        else:
+            assert reduction == "mean"
+            reduction = "mean"
+        out = out.index_reduce_(dim=0, index=idx, source=updates, reduce=reduction)
+    return out.reshape(data.shape)
