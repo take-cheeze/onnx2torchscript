@@ -7,6 +7,7 @@ from torch.jit import annotate
 from onnx2torchscript import onnx_op
 import torch
 import onnx
+import pytorch_pfn_extras as ppe
 
 
 binary_ops: Dict[str, Callable] = {
@@ -1059,7 +1060,7 @@ def op_Gather(
     return torch.gather(data, dim=axis, index=indices)
 
 
-if hasattr(torch, "scatter_reduce"):
+if ppe.requires("1.12"):
     @onnx_op("ScatterElements", 11)
     def op_ScatterElements(
         data: Tensor, indices: Tensor, updates: Tensor,
@@ -1098,7 +1099,6 @@ else:
         else:
             assert reduction == "mul"
             reduction = "multiply"
-
         return torch.scatter(
             data, dim=axis, index=indices, src=updates,
             reduce=reduction)
@@ -1147,38 +1147,63 @@ def op_ConcatFromSequence(
         return torch.concat(inputs, dim=axis)
 
 
-@onnx_op("ScatterND", 11)
-def op_ScatterND(
-    data: Tensor, indices: Tensor, updates: Tensor,
-    # *,
-    reduction: str = "none",
-) -> Tensor:
-    assert data.dim() >= 1
-    assert indices.dim() > 1
-    assert (data.dim() + indices.dim()) - (indices.shape[-1] + 1)
-    out = data.clone()
-    idx = indices.reshape(-1, indices.shape[-1])
-    nd = torch.tensor([1] + data.shape[0:data.dim() - indices.dim() - 1], device=indices.device).reshape(1, -1)
-    idx = torch.mm(idx, nd).reshape(-1)
-    assert idx.shape[0] == torch.prod(torch.tensor(indices.shape[:-1]))
-    updates = updates.reshape([-1] + updates.shape[indices.dim() - 1:])
-    out = out.reshape([-1] + data.shape[data.dim() - indices.dim():])
-    if reduction == "none":
-        out.index_copy_(dim=0, index=idx, source=updates)
-    elif reduction == "add":
-        out.index_add_(dim=0, index=idx, source=updates)
-    else:
-        if reduction == "mul":
-            reduction = "prod"
-        elif reduction == "min":
-            reduction = "amin"
-        elif reduction == "max":
-            reduction = "amax"
+if hasattr(torch, "index_reduce"):
+    @onnx_op("ScatterND", 11)
+    def op_ScatterND(
+        data: Tensor, indices: Tensor, updates: Tensor,
+        # *,
+        reduction: str = "none",
+    ) -> Tensor:
+        assert data.dim() >= 1
+        assert indices.dim() > 1
+        assert (data.dim() + indices.dim()) - (indices.shape[-1] + 1)
+        out = data.clone()
+        idx = indices.reshape(-1, indices.shape[-1])
+        nd = torch.tensor([1] + data.shape[0:data.dim() - indices.dim() - 1], device=indices.device).reshape(1, -1)
+        idx = torch.mm(idx, nd).reshape(-1)
+        assert idx.shape[0] == torch.prod(torch.tensor(indices.shape[:-1]))
+        updates = updates.reshape([-1] + updates.shape[indices.dim() - 1:])
+        out = out.reshape([-1] + data.shape[data.dim() - indices.dim():])
+        if reduction == "none":
+            out.index_copy_(dim=0, index=idx, source=updates)
+        elif reduction == "add":
+            out.index_add_(dim=0, index=idx, source=updates)
         else:
-            assert reduction == "mean"
-            reduction = "mean"
-        out = out.index_reduce_(dim=0, index=idx, source=updates, reduce=reduction)
-    return out.reshape(data.shape)
+            if reduction == "mul":
+                reduction = "prod"
+            elif reduction == "min":
+                reduction = "amin"
+            elif reduction == "max":
+                reduction = "amax"
+            else:
+                assert reduction == "mean"
+                reduction = "mean"
+            out = out.index_reduce_(dim=0, index=idx, source=updates, reduce=reduction)
+        return out.reshape(data.shape)
+else:
+    @onnx_op("ScatterND", 11)
+    def op_ScatterND(
+        data: Tensor, indices: Tensor, updates: Tensor,
+        # *,
+        reduction: str = "none",
+    ) -> Tensor:
+        assert data.dim() >= 1
+        assert indices.dim() > 1
+        assert (data.dim() + indices.dim()) - (indices.shape[-1] + 1)
+        out = data.clone()
+        idx = indices.reshape(-1, indices.shape[-1])
+        nd = torch.tensor([1] + data.shape[0:data.dim() - indices.dim() - 1], device=indices.device).reshape(1, -1)
+        idx = torch.mm(idx, nd).reshape(-1)
+        assert idx.shape[0] == torch.prod(torch.tensor(indices.shape[:-1]))
+        updates = updates.reshape([-1] + updates.shape[indices.dim() - 1:])
+        out = out.reshape([-1] + data.shape[data.dim() - indices.dim():])
+        if reduction == "none":
+            out.index_copy_(dim=0, index=idx, source=updates)
+        else:
+            assert reduction == "add"
+            out.index_add_(dim=0, index=idx, source=updates)
+        return out.reshape(data.shape)
+
 
 
 @onnx_op("Elu", 1)
@@ -1197,4 +1222,3 @@ def op_Celu(
     alpha: float = 1.0,
 ) -> Tensor:
     return torch.clamp_min(x, 0) + torch.clamp_max(alpha * torch.exp(x / alpha) - 1, 0)
-
