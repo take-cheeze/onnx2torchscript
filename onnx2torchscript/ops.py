@@ -17,6 +17,7 @@ binary_ops: Dict[str, Callable] = {
     "Div-1": torch.true_divide,
     "Equal-1": torch.eq,
     "Greater-1": torch.greater,
+    "GreaterOrEqual-12": torch.greater_equal,
     "Less-1": torch.less,
     "MatMul-1": torch.matmul,
     "Mul-1": torch.mul,
@@ -454,6 +455,26 @@ def op_ReduceSum_13(
         if axes.numel() == 0 and noop_with_empty_axes != 0:
             return data
         return torch.sum(data, dim=annotate(List[int], axes.tolist()), keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceLogSum", 1)
+def op_ReduceLogSum_1(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    return torch.log(op_ReduceSum_1(data, axes=axes, keepdims=keepdims))
+
+
+@onnx_op("ReduceLogSumExp", 1)
+def op_ReduceLogSumExp_1(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    return op_ReduceLogSum_1(torch.exp(data), axes=axes, keepdims=keepdims)
 
 
 @onnx_op("ReduceSumSquare", 1)
@@ -1158,3 +1179,22 @@ def op_ScatterND(
             reduction = "mean"
         out = out.index_reduce_(dim=0, index=idx, source=updates, reduce=reduction)
     return out.reshape(data.shape)
+
+
+@onnx_op("Elu", 1)
+def op_Elu(
+    x: Tensor,
+    # *,
+    alpha: float = 1.0,
+) -> Tensor:
+    return torch.where(x < 0, alpha * (torch.exp(x) - 1.0), x)
+
+
+@onnx_op("Celu", 12)
+def op_Celu(
+    x: Tensor,
+    # *,
+    alpha: float = 1.0,
+) -> Tensor:
+    return torch.clamp_min(x, 0) + torch.clamp_max(alpha * torch.exp(x / alpha) - 1, 0)
+

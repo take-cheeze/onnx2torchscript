@@ -199,6 +199,8 @@ if _has_mps:
         "test_scatternd_cuda",
         "test_scatternd_add_cuda",
         "test_scatternd_multiply_cuda",
+        "test_reduce_log_sum_exp.*_cuda",
+        "test_celu_expanded_cuda",
     ]
 
 for x in xfails:
