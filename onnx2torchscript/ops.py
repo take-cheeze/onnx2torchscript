@@ -1,4 +1,5 @@
 from math import ceil
+from opcode import hasjabs
 from optparse import Option
 from typing import Callable, Dict, List, Optional, Union, Tuple
 from torch import Tensor
@@ -6,6 +7,7 @@ from torch.jit import annotate
 from onnx2torchscript import onnx_op
 import torch
 import onnx
+import pytorch_pfn_extras as ppe
 
 
 binary_ops: Dict[str, Callable] = {
@@ -16,6 +18,7 @@ binary_ops: Dict[str, Callable] = {
     "Div-1": torch.true_divide,
     "Equal-1": torch.eq,
     "Greater-1": torch.greater,
+    "GreaterOrEqual-12": torch.greater_equal,
     "Less-1": torch.less,
     "MatMul-1": torch.matmul,
     "Mul-1": torch.mul,
@@ -453,6 +456,26 @@ def op_ReduceSum_13(
         if axes.numel() == 0 and noop_with_empty_axes != 0:
             return data
         return torch.sum(data, dim=annotate(List[int], axes.tolist()), keepdim=keepdims != 0)
+
+
+@onnx_op("ReduceLogSum", 1)
+def op_ReduceLogSum_1(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    return torch.log(op_ReduceSum_1(data, axes=axes, keepdims=keepdims))
+
+
+@onnx_op("ReduceLogSumExp", 1)
+def op_ReduceLogSumExp_1(
+    data: Tensor,
+    # *,
+    axes: Optional[List[int]] = None,
+    keepdims: int = 1,
+) -> Tensor:
+    return op_ReduceLogSum_1(torch.exp(data), axes=axes, keepdims=keepdims)
 
 
 @onnx_op("ReduceSumSquare", 1)
@@ -1025,3 +1048,177 @@ def op_Slice_10(
         idx = torch.arange(s, e, step, device=data.device)
         ret = torch.index_select(ret, dim=a, index=idx)
     return ret
+
+
+@onnx_op("GatherElements", 11)
+def op_Gather(
+    data: Tensor, indices: Tensor,
+    # *,
+    axis: int = 0,
+) -> Tensor:
+    indices = torch.where(indices < 0, indices + data.size(axis), indices)
+    return torch.gather(data, dim=axis, index=indices)
+
+
+if ppe.requires("1.12"):
+    @onnx_op("ScatterElements", 11)
+    def op_ScatterElements(
+        data: Tensor, indices: Tensor, updates: Tensor,
+        # *,
+        axis: int = 0, reduction: Optional[str] = None,
+    ) -> Tensor:
+        indices = torch.where(indices < 0, indices + data.size(axis), indices)
+        if reduction is None or reduction == "none":
+            return torch.scatter(data, dim=axis, index=indices, src=updates)
+
+        if reduction == "add":
+            reduction = "sum"
+        elif reduction == "mul":
+            reduction = "prod"
+        elif reduction == "mean":
+            reduction = "mean"
+        elif reduction == "max":
+            reduction = "amax"
+        else:
+            assert reduction == "min"
+            reduction = "amin"
+        return torch.scatter_reduce(
+            data, dim=axis, index=indices, src=updates, reduce=reduction)
+else:
+    @onnx_op("ScatterElements", 11)
+    def op_ScatterElements(
+        data: Tensor, indices: Tensor, updates: Tensor,
+        # *,
+        axis: int = 0, reduction: Optional[str] = None,
+    ) -> Tensor:
+        indices = torch.where(indices < 0, indices + data.size(axis), indices)
+        if reduction is None or reduction == "none":
+            return torch.scatter(data, dim=axis, index=indices, src=updates)
+        elif reduction == "add":
+            reduction = "add"
+        else:
+            assert reduction == "mul"
+            reduction = "multiply"
+        return torch.scatter(
+            data, dim=axis, index=indices, src=updates,
+            reduce=reduction)
+
+
+@onnx_op("Scatter", 9)
+def op_Scatter(
+    data: Tensor, indices: Tensor, updates: Tensor,
+    # *,
+    axis: int = 0, reduction: Optional[str] = None,
+) -> Tensor:
+    return op_ScatterElements(
+        data, indices, updates, axis=axis, reduction=reduction)
+
+
+@onnx_op("SequenceAt", 11)
+def op_SequenceAt(input_sequence: List[Tensor], position: Tensor) -> Tensor:
+    return input_sequence[position.item()]
+
+
+@onnx_op("SequenceConstruct", 11)
+def op_SequenceConstruct(inputs: List[Tensor]) -> List[Tensor]:
+    return inputs
+
+
+@onnx_op("SequenceErase", 11)
+def op_SequenceErase(inputs: List[Tensor], position: Optional[Tensor] = None) -> List[Tensor]:
+    inputs = inputs.copy()
+    if position is None:
+        del inputs[-1]
+        return inputs
+    del inputs[int(position.item())]
+    return inputs
+
+
+@onnx_op("ConcatFromSequence", 11)
+def op_ConcatFromSequence(
+    inputs: List[Tensor],
+    # *,
+    axis: Optional[int] = None, new_axis: int = 0, 
+) -> Tensor:
+    assert axis is not None
+    if new_axis != 0:
+        return torch.stack(inputs, dim=axis)
+    else:
+        return torch.concat(inputs, dim=axis)
+
+
+if hasattr(torch, "index_reduce"):
+    @onnx_op("ScatterND", 11)
+    def op_ScatterND(
+        data: Tensor, indices: Tensor, updates: Tensor,
+        # *,
+        reduction: str = "none",
+    ) -> Tensor:
+        assert data.dim() >= 1
+        assert indices.dim() > 1
+        assert (data.dim() + indices.dim()) - (indices.shape[-1] + 1)
+        out = data.clone()
+        idx = indices.reshape(-1, indices.shape[-1])
+        nd = torch.tensor([1] + data.shape[0:data.dim() - indices.dim() - 1], device=indices.device).reshape(1, -1)
+        idx = torch.mm(idx, nd).reshape(-1)
+        assert idx.shape[0] == torch.prod(torch.tensor(indices.shape[:-1]))
+        updates = updates.reshape([-1] + updates.shape[indices.dim() - 1:])
+        out = out.reshape([-1] + data.shape[data.dim() - indices.dim():])
+        if reduction == "none":
+            out.index_copy_(dim=0, index=idx, source=updates)
+        elif reduction == "add":
+            out.index_add_(dim=0, index=idx, source=updates)
+        else:
+            if reduction == "mul":
+                reduction = "prod"
+            elif reduction == "min":
+                reduction = "amin"
+            elif reduction == "max":
+                reduction = "amax"
+            else:
+                assert reduction == "mean"
+                reduction = "mean"
+            out = out.index_reduce_(dim=0, index=idx, source=updates, reduce=reduction)
+        return out.reshape(data.shape)
+else:
+    @onnx_op("ScatterND", 11)
+    def op_ScatterND(
+        data: Tensor, indices: Tensor, updates: Tensor,
+        # *,
+        reduction: str = "none",
+    ) -> Tensor:
+        assert data.dim() >= 1
+        assert indices.dim() > 1
+        assert (data.dim() + indices.dim()) - (indices.shape[-1] + 1)
+        out = data.clone()
+        idx = indices.reshape(-1, indices.shape[-1])
+        nd = torch.tensor([1] + data.shape[0:data.dim() - indices.dim() - 1], device=indices.device).reshape(1, -1)
+        idx = torch.mm(idx, nd).reshape(-1)
+        assert idx.shape[0] == torch.prod(torch.tensor(indices.shape[:-1]))
+        updates = updates.reshape([-1] + updates.shape[indices.dim() - 1:])
+        out = out.reshape([-1] + data.shape[data.dim() - indices.dim():])
+        if reduction == "none":
+            out.index_copy_(dim=0, index=idx, source=updates)
+        else:
+            assert reduction == "add"
+            out.index_add_(dim=0, index=idx, source=updates)
+        return out.reshape(data.shape)
+
+
+
+@onnx_op("Elu", 1)
+def op_Elu(
+    x: Tensor,
+    # *,
+    alpha: float = 1.0,
+) -> Tensor:
+    return torch.where(x < 0, alpha * (torch.exp(x) - 1.0), x)
+
+
+@onnx_op("Celu", 12)
+def op_Celu(
+    x: Tensor,
+    # *,
+    alpha: float = 1.0,
+) -> Tensor:
+    return torch.clamp_min(x, 0) + torch.clamp_max(alpha * torch.exp(x / alpha) - 1, 0)

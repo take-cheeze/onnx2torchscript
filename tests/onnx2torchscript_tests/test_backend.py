@@ -4,6 +4,7 @@ from onnx.backend.base import Backend, BackendRep
 import numpy as np
 import onnx
 import torch
+import pytorch_pfn_extras as ppe
 
 import onnx2torchscript as o2t
 
@@ -124,6 +125,9 @@ xfails = [
     "test_slice_neg_steps",
 ]
 
+if not ppe.requires("1.12"):
+    xfails += ["test_scatternd_multiply_"]
+
 excludes = [
     "test_arg.*_select_last_index",
     "test_BatchNorm",
@@ -138,7 +142,7 @@ excludes = [
     "test_resnet50_",
     "test_densenet121_",
     "test_sequence_insert_at_",
-    "test_sequence_model[68]_",
+    "test_sequence_model[12345678]_",
 ]
 
 if _has_mps:
@@ -194,6 +198,13 @@ if _has_mps:
         "test_unique.*_cuda",
         "test_slice_cuda",
         "test_slice_start_out_of_bounds_cuda",
+        "test_nllloss_.*_expanded_cuda",
+        "test_scatter_elements_with_duplicate_indices_cuda",
+        "test_scatternd_cuda",
+        "test_scatternd_add_cuda",
+        "test_scatternd_multiply_cuda",
+        "test_reduce_log_sum_exp.*_cuda",
+        "test_celu_expanded_cuda",
     ]
 
 for x in xfails:

@@ -6,6 +6,7 @@ setup(
     packages=find_packages(include=['onnx2pytorch']),
     install_requires=[
         'onnx',
+        "pytorch-pfn-extras",
         'torch',
     ],
     extras_require={
