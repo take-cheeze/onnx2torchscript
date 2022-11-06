@@ -9,6 +9,8 @@ import pytorch_pfn_extras as ppe
 import onnx2torchscript as o2t
 
 
+pytest_plugins = 'onnx.backend.test.report',
+
 
 _has_mps: bool = hasattr(torch.backends, "mps") and \
     torch.backends.mps.is_available()
