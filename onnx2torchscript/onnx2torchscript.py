@@ -1,3 +1,4 @@
+import warnings
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import onnx
@@ -7,6 +8,10 @@ import torch
 
 _op_table: Dict[int, Dict[str, torch._C.ScriptFunction]] = {}
 _version_cache: Dict[Tuple[str, int], torch._C.ScriptFunction] = {}
+
+
+class MetaWarning(Warning):
+    pass
 
 
 def onnx_op(
@@ -45,110 +50,158 @@ def get_onnx_ts(
     return ret
 
 
-def onnx2ts(
-    model: onnx.ModelProto, args: Any, verbose: bool = False
-) -> torch._C.ScriptModule:
-    def p(*a):
-        if verbose:
-            print(*a)
+class OnnxModule(torch.nn.Module):
+    def __init__(self, model: onnx.ModelProto) -> None:
+        super().__init__()
+        self.model = model
 
-    domain2opset: Dict[str, int] = {}
-    for o in model.opset_import:
-        domain2opset[o.domain] = o.version
+        self.meta_mode: bool = False
 
-    class OnnxModule(torch.nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            for i in model.graph.initializer:
-                p = torch.from_numpy(onnx.numpy_helper.to_array(i).copy())
-                self.register_buffer(i.name, p)
-                # if p.dtype.is_floating_point:
-                #     setattr(self, i.name, torch.nn.parameter.Parameter(p))
-                # else:
-                #     self.register_buffer(i.name, p)
+        # Construct domain opset mapping
+        self.domain2opset: Dict[str, int] = {}
+        for o in self.model.opset_import:
+            self.domain2opset[o.domain] = o.version
 
-        def forward(self, *args):
-            values: Dict[str, Any] = {}
-            initializer_names: Set[str] = set()
-            for i in model.graph.initializer:
-                values[i.name] = getattr(self, i.name)
-                initializer_names.add(i.name)
-            input_names: List[str] = []
-            for i in model.graph.input:
-                if i.name not in initializer_names:
-                    input_names.append(i.name)
-            assert len(input_names) == len(args)
-            for a, n in zip(args, input_names):
-                values[n] = a
-            for o_n in model.graph.node:
-                o_sch = onnx.defs.get_schema(
-                    o_n.op_type, domain2opset[o_n.domain], o_n.domain)
+        # Register constants as buffers to use as meta tensor
+        for o_n in self.model.graph.node:
+            o_sch = self.node_schema(o_n)
+            o_attrs = self.attribute_dict(o_sch, o_n)
+            for name, o_a in o_attrs.items():
+                if o_a.type != onnx.AttributeProto.AttributeType.TENSOR:
+                    continue
+                attr_value = onnx.helper.get_attribute_value(o_a)
+                attr_value = torch.from_numpy(
+                    onnx.numpy_helper.to_array(attr_value).copy())
+                t_name = self.attribute_state_name(o_n, name)
+                assert not hasattr(self, t_name)
+                self.register_buffer(t_name, attr_value)
 
-                o_attrs: Dict[str, onnx.AttributeProto] = {}
-                for name, o_sch_a in o_sch.attributes.items():
-                    if o_sch_a.default_value is not None:
-                        o_attrs[name] = o_sch_a.default_value
-                for o_a in o_n.attribute:
-                    o_attrs[o_a.name] = o_a
+        # Register initializers as buffers
+        for i in self.model.graph.initializer:
+            p = torch.from_numpy(onnx.numpy_helper.to_array(i).copy())
+            self.register_buffer(i.name, p)
+            # if p.dtype.is_floating_point:
+            #     setattr(self, i.name, torch.nn.parameter.Parameter(p))
+            # else:
+            #     self.register_buffer(i.name, p)
+        self.original_params = self.state_dict()
 
-                o_attr_vals: Dict[str, Any] = {}
-                for name, o_a in o_attrs.items():
-                    if o_a.type == onnx.AttributeProto.AttributeType.UNDEFINED:
+    def enable_meta_mode(self, mode: bool = True) -> None:
+        if mode:
+            for k, v in self.original_params.items():
+                self.register_buffer(k, v.to("meta"))
+        else:
+            self.load_state_dict(self.original_params)
+            for k, v in self.original_params.items():
+                setattr(self, k, v)
+        self.meta_mode = mode
+
+    def attribute_dict(self, o_sch: onnx.defs.OpSchema, o_n: onnx.NodeProto) -> Dict[str, onnx.AttributeProto]:
+        o_attrs: Dict[str, onnx.AttributeProto] = {}
+        for name, o_sch_a in o_sch.attributes.items():
+            if o_sch_a.default_value is not None:
+                o_attrs[name] = o_sch_a.default_value
+        for o_a in o_n.attribute:
+            o_attrs[o_a.name] = o_a
+        return o_attrs
+
+    def attribute_state_name(self, o_n: onnx.NodeProto, name: str) -> str:
+        return f"{o_n.name}_{o_n.output[0]}_{name}"
+
+    def attribute_values(self, o_sch: onnx.defs.OpSchema, o_n: onnx.NodeProto) -> Dict[str, Any]:
+        o_attrs: Dict[str, onnx.AttributeProto] = self.attribute_dict(o_sch, o_n)
+        o_attr_vals: Dict[str, Any] = {}
+        for name, o_a in o_attrs.items():
+            if o_a.type == onnx.AttributeProto.AttributeType.UNDEFINED:
+                continue
+
+            if o_a.type == onnx.AttributeProto.AttributeType.TENSOR:
+                o_attr_vals[name] = getattr(self, self.attribute_state_name(o_n, name))
+            else:
+                o_attr_vals[name] = onnx.helper.get_attribute_value(o_a)
+
+        return o_attr_vals
+
+    def node_schema(self, node: onnx.NodeProto) -> onnx.defs.OpSchema:
+        return onnx.defs.get_schema(
+            node.op_type, self.domain2opset[node.domain], node.domain)
+
+    def forward(self, *args: Any) -> Any:
+        values: Dict[str, Any] = {}
+        initializer_names: Set[str] = set()
+        for i in self.model.graph.initializer:
+            values[i.name] = getattr(self, i.name)
+            initializer_names.add(i.name)
+        input_names: List[str] = []
+        for i in self.model.graph.input:
+            if i.name not in initializer_names:
+                input_names.append(i.name)
+        assert len(input_names) == len(args)
+        for a, n in zip(args, input_names):
+            values[n] = a
+
+        Variadic = onnx.defs.OpSchema.FormalParameterOption.Variadic
+        for o_n in self.model.graph.node:
+            o_sch = self.node_schema(o_n)
+            o_attr_vals: Dict[str, Any] = self.attribute_values(o_sch, o_n)
+
+            t_s = get_onnx_ts(
+                o_n.op_type, self.domain2opset[o_n.domain], o_n.domain)
+            if t_s is None:
+                msg = f"{o_n.domain}::{o_n.op_type}-{self.domain2opset[o_n.domain]} not found"
+                raise NotImplementedError(msg)
+            t_sch = t_s.schema
+            ins = [None if n == '' else values[n] for n in o_n.input]
+            if len(o_sch.inputs) == 1 and o_sch.inputs[0].option == Variadic:
+                ins = [ins]
+            for idx in range(len(ins), len(t_sch.arguments)):
+                arg = t_sch.arguments[idx]
+                if arg.name in o_attr_vals:
+                    ins.append(o_attr_vals[arg.name])
+                elif arg.has_default_value():
+                    if arg.name == "_num_outputs":
+                        ins.append(len(o_n.output))
                         continue
+                    ins.append(arg.default_value)
+                else:
+                    raise RuntimeError(f"{arg.name} not provided")
+            outs = t_s(*ins)
+            if not isinstance(outs, (tuple, list)):
+                outs = (outs,)
 
-                    attr_value = onnx.helper.get_attribute_value(o_a)
-                    if o_a.type == onnx.AttributeProto.AttributeType.TENSOR:
-                        attr_value = torch.from_numpy(
-                            onnx.numpy_helper.to_array(attr_value).copy())
-                        self.register_buffer(
-                            o_n.output[0], attr_value, persistent=False)
-                        o_attr_vals[name] = attr_value
-                    else:
-                        o_attr_vals[name] = attr_value
-
-                t_s = get_onnx_ts(
-                    o_n.op_type, domain2opset[o_n.domain], o_n.domain)
-                if t_s is None:
-                    msg = f"{o_n.domain}::{o_n.op_type}-{domain2opset[o_n.domain]} not found"
-                    raise NotImplementedError(msg)
-                t_sch = t_s.schema
-                ins = [None if n == '' else values[n] for n in o_n.input]
-                if len(o_sch.inputs) == 1 and o_sch.inputs[0].option == onnx.defs.OpSchema.FormalParameterOption.Variadic:
-                    ins = [ins]
-                for idx in range(len(ins), len(t_sch.arguments)):
-                    arg = t_sch.arguments[idx]
-                    if arg.name in o_attr_vals:
-                        ins.append(o_attr_vals[arg.name])
-                    elif arg.has_default_value():
-                        if arg.name == "_num_outputs":
-                            ins.append(len(o_n.output))
-                            continue
-                        ins.append(arg.default_value)
-                    else:
-                        raise RuntimeError(f"{arg.name} not provided")
-                outs = t_s(*ins)
-                if not isinstance(outs, (tuple, list)):
-                    outs = (outs,)
-
-                if len(outs) >= len(o_n.output):
+            if len(outs) >= len(o_n.output):
+                for n, o in zip(o_n.output, outs):
+                    assert n not in values
+                    values[n] = o
+            else:
+                if len(o_sch.outputs) == 1 and o_sch.outputs[0].option == Variadic:
+                    assert len(o_n.output) == len(outs)
                     for n, o in zip(o_n.output, outs):
                         assert n not in values
                         values[n] = o
                 else:
-                    if len(o_sch.outputs) == 1 and o_sch.outputs[0].option == onnx.defs.OpSchema.FormalParameterOption.Variadic:
-                        assert len(o_n.output) == len(outs)
-                        for n, o in zip(o_n.output, outs):
-                            assert n not in values
-                            values[n] = o
-                    else:
-                        raise RuntimeError(f"Cannot supply outputs: {o_n.output[len(outs):]}")
+                    raise RuntimeError(f"Cannot supply outputs: {o_n.output[len(outs):]}")
 
-            ret = tuple([values[i.name] for i in model.graph.output])
-            if len(ret) == 1:
-                return ret[0]
-            return ret
+        ret = tuple([values[i.name] for i in self.model.graph.output])
+        if len(ret) == 1:
+            return ret[0]
+        return ret
 
-    m = OnnxModule()
-    t = torch.jit.trace(m, args, check_trace=False)
+
+def onnx2ts(
+    model: onnx.ModelProto, args: Any, verbose: bool = False
+) -> torch._C.ScriptModule:
+    m = OnnxModule(model)
+    try:
+        meta_args = tuple(a.to('meta') for a in args)
+        m.enable_meta_mode(True)
+        t = torch.jit.trace(m, meta_args, check_trace=False)
+        t.load_state_dict(m.original_params)
+        for k, v in m.original_params.items():
+            setattr(t, k, v)
+    except NotImplementedError as e:
+        warnings.warn(f"Failed meta tracing mode, fallbacking: {e}", MetaWarning)
+        m.enable_meta_mode(False)
+        t = torch.jit.trace(m, args, check_trace=False)
 
     return t

@@ -207,6 +207,7 @@ if _has_mps:
         "test_scatternd_multiply_cuda",
         "test_reduce_log_sum_exp.*_cuda",
         "test_celu_expanded_cuda",
+        "test_layer_normalization.*_expanded_cuda",
     ]
 
 for x in xfails:
