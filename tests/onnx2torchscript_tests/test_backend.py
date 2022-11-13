@@ -5,6 +5,7 @@ import numpy as np
 import onnx
 import torch
 import pytorch_pfn_extras as ppe
+import contextlib
 
 import onnx2torchscript as o2t
 
@@ -25,6 +26,17 @@ def _move_to(ins: List[Any], device: torch.device) -> List[Any]:
             assert isinstance(i, torch.Tensor)
             ret.append(i.to(device))
     return ret
+
+
+@contextlib.contextmanager
+def _disable_profiler():
+    old_profiling_executor = torch._C._jit_set_profiling_executor(False)
+    old_profiling_mode = torch._C._jit_set_profiling_mode(False)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_profiling_executor(old_profiling_executor)
+        torch._C._jit_set_profiling_mode(old_profiling_mode)
 
 
 class TorchScriptBackendRep(BackendRep):
@@ -52,9 +64,13 @@ class TorchScriptBackendRep(BackendRep):
                 ins.append([torch.from_numpy(j.copy()) for j in i])
             else:
                 raise f"Unsupported input: {i}"
-        self.ts = o2t.onnx2ts(self.model, ins)
+        if ppe.requires("1.12"):
+            self.ts = o2t.onnx2ts(self.model, ins)
+        else:
+            with _disable_profiler():
+                self.ts = o2t.onnx2ts(self.model, ins)
         self.ts.to(device=self.device)
-        ins =  _move_to(ins, self.device)
+        ins = _move_to(ins, self.device)
         ret = self.ts(*ins)
         if not isinstance(ret, (list, tuple)):
             ret = (ret,)
@@ -207,6 +223,7 @@ if _has_mps:
         "test_scatternd_multiply_cuda",
         "test_reduce_log_sum_exp.*_cuda",
         "test_celu_expanded_cuda",
+        "test_layer_normalization.*_expanded_cuda",
     ]
 
 for x in xfails:
