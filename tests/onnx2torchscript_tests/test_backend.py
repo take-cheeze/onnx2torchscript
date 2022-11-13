@@ -54,7 +54,7 @@ class TorchScriptBackendRep(BackendRep):
                 raise f"Unsupported input: {i}"
         self.ts = o2t.onnx2ts(self.model, ins)
         self.ts.to(device=self.device)
-        ins =  _move_to(ins, self.device)
+        ins = _move_to(ins, self.device)
         ret = self.ts(*ins)
         if not isinstance(ret, (list, tuple)):
             ret = (ret,)
