@@ -60,9 +60,15 @@ jobs:
     - name: Install
       run: |
         pip install -v -e .[test]
+
     - name: Test with pytest
       run: |
         pytest --durations=10
+    - name: Test script
+      run: |
+        test_dir=$(python3 -m pip show onnx | awk '/Location: / { print $2 }')/onnx/backend/test/data/node/test_abs
+        python3 ./scripts/run_test_dir.py "${test_dir}"
+        ls "${test_dir}/model.pt"
 
   lint:
     runs-on: "ubuntu-latest"

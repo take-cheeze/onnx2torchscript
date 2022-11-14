@@ -1,5 +1,7 @@
 import onnx2torchscript as o2ts
+import torch
 
+import os
 import sys
 from typing import List
 
@@ -10,6 +12,8 @@ def main(argv: List[str]) -> None:
     test_dir = argv[1]
 
     ts, datas = o2ts.onnx_testdir_to_torchscript(test_dir)
+    with open(os.path.join(test_dir, "model.pt"), "wb") as f:
+        torch.jit.save(ts, f)
     for inputs, outputs in datas:
         actual_outs = ts(*inputs)
         if not isinstance(actual_outs, (list, tuple)):
