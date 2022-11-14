@@ -98,11 +98,12 @@ class OnnxModule(torch.nn.Module):
                 setattr(self, k, v)
         self.meta_mode = mode
 
-    def attribute_dict(self, o_sch: onnx.defs.OpSchema, o_n: onnx.NodeProto) -> Dict[str, onnx.AttributeProto]:
+    def attribute_dict(self, o_sch: Optional[onnx.defs.OpSchema], o_n: onnx.NodeProto) -> Dict[str, onnx.AttributeProto]:
         o_attrs: Dict[str, onnx.AttributeProto] = {}
-        for name, o_sch_a in o_sch.attributes.items():
-            if o_sch_a.default_value is not None:
-                o_attrs[name] = o_sch_a.default_value
+        if o_sch is not None:
+            for name, o_sch_a in o_sch.attributes.items():
+                if o_sch_a.default_value is not None:
+                    o_attrs[name] = o_sch_a.default_value
         for o_a in o_n.attribute:
             o_attrs[o_a.name] = o_a
         return o_attrs
@@ -110,7 +111,7 @@ class OnnxModule(torch.nn.Module):
     def attribute_state_name(self, o_n: onnx.NodeProto, name: str) -> str:
         return f"{o_n.name}_{o_n.output[0]}_{name}".replace('.', '_')
 
-    def attribute_values(self, o_sch: onnx.defs.OpSchema, o_n: onnx.NodeProto) -> Dict[str, Any]:
+    def attribute_values(self, o_sch: Optional[onnx.defs.OpSchema], o_n: onnx.NodeProto) -> Dict[str, Any]:
         o_attrs: Dict[str, onnx.AttributeProto] = self.attribute_dict(o_sch, o_n)
         o_attr_vals: Dict[str, Any] = {}
         for name, o_a in o_attrs.items():
@@ -124,9 +125,15 @@ class OnnxModule(torch.nn.Module):
 
         return o_attr_vals
 
-    def node_schema(self, node: onnx.NodeProto) -> onnx.defs.OpSchema:
-        return onnx.defs.get_schema(
-            node.op_type, self.domain2opset[node.domain], node.domain)
+    def opset(self, domain: str) -> int:
+        return self.domain2opset.get(domain, 1)
+
+    def node_schema(self, node: onnx.NodeProto) -> Optional[onnx.defs.OpSchema]:
+        ver = self.opset(node.domain)
+        if onnx.defs.has(node.op_type, node.domain):
+            return onnx.defs.get_schema(
+                node.op_type, ver, node.domain)
+        return None
 
     def forward(self, *args: Any) -> Any:
         values: Dict[str, Any] = {}
@@ -148,13 +155,13 @@ class OnnxModule(torch.nn.Module):
             o_attr_vals: Dict[str, Any] = self.attribute_values(o_sch, o_n)
 
             t_s = get_onnx_ts(
-                o_n.op_type, self.domain2opset[o_n.domain], o_n.domain)
+                o_n.op_type, self.opset(o_n.domain), o_n.domain)
             if t_s is None:
-                msg = f"{o_n.domain}::{o_n.op_type}-{self.domain2opset[o_n.domain]} not found"
+                msg = f"{o_n.domain}::{o_n.op_type}-{self.opset(o_n.domain)} not found"
                 raise NotImplementedError(msg)
             t_sch = t_s.schema
             ins = [None if n == '' else values[n] for n in o_n.input]
-            if len(o_sch.inputs) == 1 and o_sch.inputs[0].option == Variadic:
+            if o_sch is not None and len(o_sch.inputs) == 1 and o_sch.inputs[0].option == Variadic:
                 ins = [ins]
             for idx in range(len(ins), len(t_sch.arguments)):
                 arg = t_sch.arguments[idx]
@@ -176,7 +183,7 @@ class OnnxModule(torch.nn.Module):
                     assert n not in values
                     values[n] = o
             else:
-                if len(o_sch.outputs) == 1 and o_sch.outputs[0].option == Variadic:
+                if o_sch is not None and len(o_sch.outputs) == 1 and o_sch.outputs[0].option == Variadic:
                     assert len(o_n.output) == len(outs)
                     for n, o in zip(o_n.output, outs):
                         assert n not in values

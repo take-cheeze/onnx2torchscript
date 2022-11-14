@@ -79,3 +79,34 @@ def test_dir():
         assert len(actual_outs) == len(outputs)
         for e_o, a_o in zip(outputs, actual_outs):
             assert torch.allclose(e_o, a_o)
+
+
+def test_custom_domain():
+    domain = "com.example.custom"
+
+    @o2t.onnx_op(f"{domain}::Add", 1)
+    def op_Add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return a + b
+
+    m = onnx.ModelProto()
+    n = m.graph.node.add()
+    n.domain = domain
+    n.op_type = "Add"
+    n.input.extend(["input_1", "input_2"])
+    n.output.extend(["output_1"])
+    i1 = m.graph.input.add()
+    i1.name = "input_1"
+    i2 = m.graph.input.add()
+    i2.name = "input_2"
+    o1 = m.graph.output.add()
+    o1.name = "output_1"
+    o_d = m.opset_import.add()
+    o_d.domain = ""
+    o_d.version = 12
+    c_d = m.opset_import.add()
+    c_d.domain = domain
+    c_d.version = 2
+
+    a, b = torch.rand(10), torch.rand(10)
+    t = o2t.onnx2ts(m, (a, b))
+    assert (t(a, b) == a + b).all()
