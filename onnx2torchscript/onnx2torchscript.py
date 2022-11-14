@@ -108,7 +108,7 @@ class OnnxModule(torch.nn.Module):
         return o_attrs
 
     def attribute_state_name(self, o_n: onnx.NodeProto, name: str) -> str:
-        return f"{o_n.name}_{o_n.output[0]}_{name}"
+        return f"{o_n.name}_{o_n.output[0]}_{name}".replace('.', '_')
 
     def attribute_values(self, o_sch: onnx.defs.OpSchema, o_n: onnx.NodeProto) -> Dict[str, Any]:
         o_attrs: Dict[str, onnx.AttributeProto] = self.attribute_dict(o_sch, o_n)
