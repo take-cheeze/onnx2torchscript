@@ -229,14 +229,14 @@ def onnx_testdir_to_torchscript(test_dir: str) -> Tuple[torch._C.ScriptModule, L
             with open(i, 'rb') as f:
                 p = onnx.TensorProto()
                 p.ParseFromString(f.read())
-                ins.append(torch.from_numpy(onnx.numpy_helper.to_array(p)))
+                ins.append(torch.from_numpy(onnx.numpy_helper.to_array(p).copy()))
         output_files = glob.glob(os.path.join(c, "output_*.pb"))
         outs: List[torch.Tensor] = []
         for i in output_files:
             with open(i, 'rb') as f:
                 p = onnx.TensorProto()
                 p.ParseFromString(f.read())
-                outs.append(torch.from_numpy(onnx.numpy_helper.to_array(p)))
+                outs.append(torch.from_numpy(onnx.numpy_helper.to_array(p).copy()))
         ret.append((ins, outs))
     assert len(ret) >= 1
 
