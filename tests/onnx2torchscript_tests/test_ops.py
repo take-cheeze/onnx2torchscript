@@ -6,6 +6,7 @@ import numpy as np
 import onnx
 import onnx.backend.test
 import tempfile
+import os
 from onnx.backend.base import Backend, BackendRep
 
 
@@ -66,3 +67,15 @@ def test_initializer():
 
     m = run_op_test(M(), torch.rand(10))
     assert len(m.graph.initializer) == 1
+
+
+def test_dir():
+    d = os.path.join(os.path.dirname(onnx.__file__), "backend/test/data/node/test_abs")
+    ts, datas = o2t.onnx_testdir_to_torchscript(d)
+    for inputs, outputs in datas:
+        actual_outs = ts(*inputs)
+        if not isinstance(actual_outs, (list, tuple)):
+            actual_outs = (actual_outs,)
+        assert len(actual_outs) == len(outputs)
+        for e_o, a_o in zip(outputs, actual_outs):
+            assert torch.allclose(e_o, a_o)
