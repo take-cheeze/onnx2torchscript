@@ -1,5 +1,7 @@
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+import os
+import glob
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import onnx
 import onnx.numpy_helper
@@ -205,3 +207,32 @@ def onnx2ts(
         t = torch.jit.trace(m, args, check_trace=False)
 
     return t
+
+
+def onnx_testdir_to_torchscript(test_dir: str) -> Tuple[torch._C.ScriptModule, List[Tuple[List[torch.Tensor], List[torch.Tensor]]]]:
+    model_path = os.path.join(test_dir, "model.onnx")
+    assert os.path.exists(model_path)
+
+    cases = glob.glob(os.path.join(test_dir, "test_data_set_*"))
+    ret: List[Tuple[List[torch.Tensor], List[torch.Tensor]]] = []
+    for c in cases:
+        input_files = glob.glob(os.path.join(c, "input_*.pb"))
+        ins: List[torch.Tensor] = []
+        for i in input_files:
+            with open(i, 'rb') as f:
+                p = onnx.TensorProto()
+                p.ParseFromString(f.read())
+                ins.append(torch.from_numpy(onnx.numpy_helper.to_array(p)))
+        output_files = glob.glob(os.path.join(c, "output_*.pb"))
+        outs: List[torch.Tensor] = []
+        for i in output_files:
+            with open(i, 'rb') as f:
+                p = onnx.TensorProto()
+                p.ParseFromString(f.read())
+                outs.append(torch.from_numpy(onnx.numpy_helper.to_array(p)))
+        ret.append((ins, outs))
+    assert len(ret) >= 1
+
+    ts = onnx2ts(onnx.load_model(model_path), ret[0][0])
+
+    return ts, ret
