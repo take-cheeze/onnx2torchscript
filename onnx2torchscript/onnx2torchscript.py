@@ -81,7 +81,7 @@ class OnnxModule(torch.nn.Module):
         # Register initializers as buffers
         for i in self.model.graph.initializer:
             p = torch.from_numpy(onnx.numpy_helper.to_array(i).copy())
-            self.register_buffer(i.name, p)
+            self.register_buffer(self.escape_buffer_name(i.name), p)
             # if p.dtype.is_floating_point:
             #     setattr(self, i.name, torch.nn.parameter.Parameter(p))
             # else:
@@ -108,8 +108,11 @@ class OnnxModule(torch.nn.Module):
             o_attrs[o_a.name] = o_a
         return o_attrs
 
+    def escape_buffer_name(self, name: str) ->  str:
+        return name.replace('.', '_')
+
     def attribute_state_name(self, o_n: onnx.NodeProto, name: str) -> str:
-        return f"{o_n.name}_{o_n.output[0]}_{name}".replace('.', '_')
+        return self.escape_buffer_name(f"{o_n.name}_{o_n.output[0]}_{name}")
 
     def attribute_values(self, o_sch: Optional[onnx.defs.OpSchema], o_n: onnx.NodeProto) -> Dict[str, Any]:
         o_attrs: Dict[str, onnx.AttributeProto] = self.attribute_dict(o_sch, o_n)
@@ -139,12 +142,14 @@ class OnnxModule(torch.nn.Module):
         values: Dict[str, Any] = {}
         initializer_names: Set[str] = set()
         for i in self.model.graph.initializer:
-            values[i.name] = getattr(self, i.name)
-            initializer_names.add(i.name)
+            n = self.escape_buffer_name(i.name)
+            values[n] = getattr(self, n)
+            initializer_names.add(n)
         input_names: List[str] = []
         for i in self.model.graph.input:
-            if i.name not in initializer_names:
-                input_names.append(i.name)
+            n = self.escape_buffer_name(i.name)
+            if n not in initializer_names:
+                input_names.append(n)
         assert len(input_names) == len(args)
         for a, n in zip(args, input_names):
             values[n] = a
@@ -160,7 +165,7 @@ class OnnxModule(torch.nn.Module):
                 msg = f"{o_n.domain}::{o_n.op_type}-{self.opset(o_n.domain)} not found"
                 raise NotImplementedError(msg)
             t_sch = t_s.schema
-            ins = [None if n == '' else values[n] for n in o_n.input]
+            ins = [None if n == '' else values[self.escape_buffer_name(n)] for n in o_n.input]
             if o_sch is not None and len(o_sch.inputs) == 1 and o_sch.inputs[0].option == Variadic:
                 ins = [ins]
             for idx in range(len(ins), len(t_sch.arguments)):
@@ -180,12 +185,14 @@ class OnnxModule(torch.nn.Module):
 
             if len(outs) >= len(o_n.output):
                 for n, o in zip(o_n.output, outs):
+                    n = self.escape_buffer_name(n)
                     assert n not in values
                     values[n] = o
             else:
                 if o_sch is not None and len(o_sch.outputs) == 1 and o_sch.outputs[0].option == Variadic:
                     assert len(o_n.output) == len(outs)
                     for n, o in zip(o_n.output, outs):
+                        n = self.escape_buffer_name(n)
                         assert n not in values
                         values[n] = o
                 else:
