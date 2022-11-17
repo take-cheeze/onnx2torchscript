@@ -229,24 +229,31 @@ def onnx_testdir_to_torchscript(test_dir: str) -> Tuple[torch._C.ScriptModule, L
 
     cases = glob.glob(os.path.join(test_dir, "test_data_set_*"))
     ret: List[Tuple[List[torch.Tensor], List[torch.Tensor]]] = []
+    m = onnx.load_model(model_path)
     for c in cases:
         input_files = glob.glob(os.path.join(c, "input_*.pb"))
-        ins: List[torch.Tensor] = []
+        in_dict: Dict[str, torch.Tensor] = {}
         for i in input_files:
             with open(i, 'rb') as f:
                 p = onnx.TensorProto()
                 p.ParseFromString(f.read())
-                ins.append(torch.from_numpy(onnx.numpy_helper.to_array(p).copy()))
+                in_dict[p.name] = torch.from_numpy(onnx.numpy_helper.to_array(p).copy())
+        ins: List[torch.Tensor] = []
+        for i in m.graph.input:
+            ins.append(in_dict[i.name])
         output_files = glob.glob(os.path.join(c, "output_*.pb"))
-        outs: List[torch.Tensor] = []
+        out_dict: Dict[str, torch.Tensor] = {}
         for i in output_files:
             with open(i, 'rb') as f:
                 p = onnx.TensorProto()
                 p.ParseFromString(f.read())
-                outs.append(torch.from_numpy(onnx.numpy_helper.to_array(p).copy()))
+                out_dict[p.name] = torch.from_numpy(onnx.numpy_helper.to_array(p).copy())
+        outs: List[torch.Tensor] = []
+        for i in m.graph.output:
+            outs.append(out_dict[i.name])
         ret.append((ins, outs))
     assert len(ret) >= 1
 
-    ts = onnx2ts(onnx.load_model(model_path), ret[0][0])
+    ts = onnx2ts(m, ret[0][0])
 
     return ts, ret
