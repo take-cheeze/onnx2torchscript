@@ -240,7 +240,7 @@ def op_Shape(
     s = data.shape
     if end is None:
         end = len(s)
-    return torch.tensor(s[start:end])
+    return torch.tensor(s[start:end], device=data.device)
 
 
 @onnx_op("Transpose", 1)
@@ -1053,7 +1053,7 @@ def op_Slice_10(
 
 
 @onnx_op("GatherElements", 11)
-def op_Gather(
+def op_GatherElements(
     data: Tensor, indices: Tensor,
     # *,
     axis: int = 0,
@@ -1224,3 +1224,22 @@ def op_Celu(
     alpha: float = 1.0,
 ) -> Tensor:
     return torch.clamp_min(x, 0) + torch.clamp_max(alpha * torch.exp(x / alpha) - 1, 0)
+
+
+def resolve_negative_indices(data: Tensor, indices: Tensor, axis: int) -> Tensor:
+    indices = indices.to(torch.long)
+    if indices.numel() == 0:
+        return indices
+    return torch.where(indices < 0, indices + data.shape[axis], indices)
+
+
+@onnx_op("Gather", 13)
+def op_Gather(
+    data: Tensor, indices: Tensor,
+    # *,
+    axis: int = 0,
+) -> Tensor:
+    positive_indices = resolve_negative_indices(data, indices, axis)
+    indices_collapsed = positive_indices.reshape(indices.numel())
+    shape = data.shape[0:axis] + indices.shape + data.shape[axis + 1:]
+    return data.index_select(dim=axis, index=indices_collapsed).reshape(shape)
