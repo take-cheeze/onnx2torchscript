@@ -240,7 +240,7 @@ def op_Shape(
     s = data.shape
     if end is None:
         end = len(s)
-    return torch.tensor(s[start:end])
+    return torch.tensor(s[start:end], device=data.device)
 
 
 @onnx_op("Transpose", 1)
