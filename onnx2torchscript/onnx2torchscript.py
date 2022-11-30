@@ -179,7 +179,6 @@ class OnnxModule(torch.nn.Module):
                     ins.append(arg.default_value)
                 else:
                     raise RuntimeError(f"{arg.name} not provided")
-            print(*ins)
             outs = t_s(*ins)
             if not isinstance(outs, (tuple, list)):
                 outs = (outs,)
