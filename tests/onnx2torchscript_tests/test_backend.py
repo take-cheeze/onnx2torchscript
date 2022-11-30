@@ -141,6 +141,7 @@ xfails = [
     "test_cumsum_1d_reverse_exclusive",
     "test_cumsum_1d_reverse",
     "test_slice_neg_steps",
+    "test_optional_get_element_sequence",
 ]
 
 if not ppe.requires("1.12"):

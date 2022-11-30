@@ -202,7 +202,7 @@ def op_TopK(
     return torch.topk(x, k.item(), dim=axis, largest=largest != 0, sorted=sorted != 0)
 
 
-OnnxAny = Union[Tensor, List[Tensor], Optional[Tensor]]
+OnnxAny = Union[Tensor, List[Tensor], Optional[Tensor], Optional[List[Tensor]]]
 
 @onnx_op("Identity", 1)
 def op_Identity(input: OnnxAny) -> OnnxAny:
@@ -1243,3 +1243,9 @@ def op_Gather(
     indices_collapsed = positive_indices.reshape(indices.numel())
     shape = data.shape[0:axis] + indices.shape + data.shape[axis + 1:]
     return data.index_select(dim=axis, index=indices_collapsed).reshape(shape)
+
+
+@onnx_op("OptionalGetElement", 15)
+def op_OptionalGetElement(input: Optional[OnnxAny]) -> OnnxAny:
+    assert input is not None
+    return input
