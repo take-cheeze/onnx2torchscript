@@ -1,7 +1,7 @@
 import warnings
 import os
 import glob
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import onnx
 import onnx.numpy_helper
@@ -179,6 +179,7 @@ class OnnxModule(torch.nn.Module):
                     ins.append(arg.default_value)
                 else:
                     raise RuntimeError(f"{arg.name} not provided")
+            print(*ins)
             outs = t_s(*ins)
             if not isinstance(outs, (tuple, list)):
                 outs = (outs,)
@@ -204,12 +205,21 @@ class OnnxModule(torch.nn.Module):
         return ret
 
 
+def to_meta(args: Any) -> Any:
+    if isinstance(args, torch.Tensor):
+        return args.to('meta')
+    if isinstance(args, tuple):
+        return tuple(to_meta(a) for a in args)
+    assert isinstance(args, list)
+    return [to_meta(a) for a in args]
+
+
 def onnx2ts(
     model: onnx.ModelProto, args: Any, verbose: bool = False
 ) -> torch._C.ScriptModule:
     m = OnnxModule(model)
     try:
-        meta_args = tuple(a.to('meta') for a in args)
+        meta_args = to_meta(args)
         m.enable_meta_mode(True)
         t = torch.jit.trace(m, meta_args, check_trace=False)
         t.load_state_dict(m.original_params)
