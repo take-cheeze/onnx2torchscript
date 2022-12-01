@@ -1058,8 +1058,9 @@ def op_Gather(
     # *,
     axis: int = 0,
 ) -> Tensor:
-    indices = torch.where(indices < 0, indices + data.size(axis), indices)
-    return torch.index_select(data, dim=axis, index=indices)
+    out_shape = data.shape[:axis] + indices.shape + data.shape[axis + 1:]
+    indices = torch.where(indices < 0, indices + data.size(axis), indices).flatten()
+    return torch.index_select(data, dim=axis, index=indices).reshape(out_shape)
 
 
 @onnx_op("GatherND", 1)
