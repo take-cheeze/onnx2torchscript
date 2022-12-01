@@ -1090,11 +1090,9 @@ def op_GatherND(
 
     out_buf: List[Tensor] = []
     for batch_dim in range(batch_dims_numel):
-        for outer_dim in range(reshaped_indices.shape[1]):
-            idx = reshaped_indices[batch_dim][outer_dim].reshape(1, -1)
-            idx = torch.mm(idx, idx_prod).to(data.device)
-            assert idx.numel() == 1
-            out_buf.append(reshaped_data[batch_dim][int(idx.item())])
+        idx = reshaped_indices[batch_dim]
+        idx = torch.mm(idx.cpu(), idx_prod.cpu()).to(data.device).reshape(-1)
+        out_buf.append(reshaped_data[batch_dim].index_select(dim=0, index=idx))
     out_buf = torch.stack(out_buf)
     return out_buf.reshape(output_shape)
 
