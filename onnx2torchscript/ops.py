@@ -1052,6 +1052,54 @@ def op_Slice_10(
     return ret
 
 
+@onnx_op("Gather", 1)
+def op_Gather(
+    data: Tensor, indices: Tensor,
+    # *,
+    axis: int = 0,
+) -> Tensor:
+    indices = torch.where(indices < 0, indices + data.size(axis), indices)
+    return torch.index_select(data, dim=axis, index=indices)
+
+
+@onnx_op("GatherND", 1)
+def op_GatherND(
+    data: Tensor, indices: Tensor,
+    # *,
+    batch_dims: int = 0,
+) -> Tensor:
+    assert indices.shape[-1] <= len(data.shape)
+
+    batch_dims_shape = indices.shape[0:batch_dims]
+    batch_dims_numel = int(torch.prod(torch.tensor(batch_dims_shape)).item())
+
+    reshaped_indices = indices.reshape([batch_dims_numel, -1, indices.shape[-1]])
+    if indices.shape[-1] == len(data.shape):
+        output_shape = batch_dims_shape + indices.shape[batch_dims:-1]
+        reshaped_data = data.reshape([batch_dims_numel, -1])
+        shapes = data.shape[-indices.shape[-1] + 1:] + [1]
+    else:
+        rest_dims = data.shape[batch_dims + indices.shape[-1]:]
+        output_shape = batch_dims_shape + indices.shape[batch_dims:-1] + rest_dims
+        reshaped_data = data.reshape([batch_dims_numel, -1] + rest_dims)
+        shapes = data.shape[batch_dims + 1:-len(rest_dims)] + [1]
+
+    shapes.reverse()
+    idx_prod = torch.tensor(shapes).cumprod(0).flip(0).reshape(-1, 1)
+    assert len(shapes) == indices.shape[-1]
+
+    out_buf: List[Tensor] = []
+    for batch_dim in range(batch_dims_numel):
+        for outer_dim in range(reshaped_indices.shape[1]):
+            idx = reshaped_indices[batch_dim][outer_dim].reshape(1, -1)
+            idx = torch.mm(idx, idx_prod).to(data.device)
+            assert idx.numel() == 1
+            out_buf.append(reshaped_data[batch_dim][int(idx.item())])
+    out_buf = torch.stack(out_buf)
+    return out_buf.reshape(output_shape)
+
+
+
 @onnx_op("GatherElements", 11)
 def op_GatherElements(
     data: Tensor, indices: Tensor,
