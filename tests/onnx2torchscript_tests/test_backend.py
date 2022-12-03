@@ -93,6 +93,10 @@ class TorchScriptBackend(Backend):
         for n in model.graph.node:
             s = o2t.get_onnx_ts(n.op_type, domain2opset[n.domain], n.domain)
             if s is None:
+                if onnx.defs.has(n.op_type, n.domain):
+                    schema = onnx.defs.get_schema(n.op_type, domain2opset[n.domain], n.domain)
+                    if schema.has_function or schema.has_context_dependent_function:
+                        continue
                 print(n.op_type, domain2opset[n.domain])
                 return False
 
