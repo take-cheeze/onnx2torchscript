@@ -31,7 +31,15 @@ def onnx_op(
 
 
 # Key type is like: (domain, op name)
-_blacklist_functions: Set[Tuple[str, str]] = set()
+_blacklist_functions: Set[Tuple[str, str]] = set([
+    ("", "BlackmanWindow"),
+    ("", "Range"),
+    ("", "DynamicQuantizeLinear"),
+    ("", "HammingWindow"),
+    ("", "HannWindow"),
+    ("", "MelWeightMatrix"),
+    ("", "MeanVarianceNormalization"),
+])
 
 
 def get_onnx_ts(
@@ -111,6 +119,8 @@ class OnnxModule(torch.nn.Module):
         while True:
             gen_func: Dict[int, onnx.FunctionProto] = {}
             for n_idx, n in enumerate(g.node):
+                if (n.domain, n.op_type) in _blacklist_functions:
+                    continue
                 sch = self.node_schema(n)
                 if sch is None:
                     continue
@@ -257,6 +267,8 @@ class OnnxModule(torch.nn.Module):
                         continue
                     ins.append(arg.default_value)
                 else:
+                    print(o_n.op_type, arg.name)
+                    print(o_n)
                     raise RuntimeError(f"{arg.name} not provided")
             outs = t_s(*ins)
             if not isinstance(outs, (tuple, list)):

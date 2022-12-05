@@ -93,8 +93,12 @@ def op_Gemm(
 @onnx_op("Constant", 1)
 def op_Constant(
     # *,
-    value: Tensor
+    value: Optional[Tensor] = None,
+    value_int: Optional[int] = None,
 ) -> Tensor:
+    if value_int is not None:
+        return torch.scalar_tensor(value_int, dtype=torch.int64)
+    assert value is not None
     return value
 
 
@@ -205,7 +209,7 @@ def op_TopK(
 OnnxAny = Union[Tensor, List[Tensor], Optional[Tensor], Optional[List[Tensor]]]
 
 @onnx_op("Identity", 1)
-def op_Identity(input: OnnxAny) -> OnnxAny:
+def op_Identity(input: Tensor) -> Tensor:
     return input
 
 
@@ -215,7 +219,14 @@ def op_Reshape(
     # *,
     allowzero: int = 0
 ) -> Tensor:
-    return torch.reshape(data, annotate(List[int], shape.tolist()))
+    shape = annotate(List[int], shape.tolist())
+    if allowzero != 0:
+        return torch.reshape(data, shape)
+
+    new_shape: List[int] = []    
+    for idx, d in enumerate(shape):
+        new_shape.append(data.shape[idx] if d == 0 else d)
+    return torch.reshape(data, new_shape)
 
 
 @onnx_op("BitShift", 11)
@@ -615,13 +626,9 @@ def op_Unsqueeze_1(
     return ret
 
 
-@onnx_op("Cast", 1)
-def op_Cast(
-    input: Tensor,
-    # *,
-    to: int,
-) -> Tensor:
-    _to_torch_dtype: Dict[int, torch.dtype] = {
+@torch.jit.script
+def _to_torch_dtype(d: int) -> torch.dtype:
+    table: Dict[int, torch.dtype] = {
         1: torch.float,
         2: torch.uint8,
         3: torch.int8,
@@ -631,7 +638,17 @@ def op_Cast(
         11: torch.double,
         9: torch.bool,
     }
-    return  input.to(_to_torch_dtype[to])
+
+    return table[d]
+
+
+@onnx_op("Cast", 1)
+def op_Cast(
+    input: Tensor,
+    # *,
+    to: int,
+) -> Tensor:
+    return  input.to(_to_torch_dtype(to))
 
 
 @onnx_op("Compress", 9)
@@ -1296,3 +1313,31 @@ def op_Gather(
 def op_OptionalGetElement(input: Optional[OnnxAny]) -> OnnxAny:
     assert input is not None
     return input
+
+@onnx_op("Bernoulli", 15)
+def op_Bernoulli(
+    input: Tensor,
+    # *,
+    dtype: Optional[int] = None,
+    seed: Optional[int] = None,
+) -> Tensor:
+    if seed is not None:
+        torch.manual_seed(seed)
+    dtype = _to_torch_dtype(dtype) if dtype is not None else input.dtype
+    out = torch.empty_like(input, dtype=dtype)
+    return torch.bernoulli(input, out=out)
+
+
+@onnx_op("NegativeLogLikelihoodLoss", 12)
+def op_nll_loss(
+    input: Tensor, target: Tensor, weight: Optional[Tensor] = None,
+    # *,
+    ignore_index: Optional[int] = None,
+    reduction: str = "none",
+) -> Tensor:
+    if reduction == '':
+        reduction = 'none'
+    return torch.nn.functional.nll_loss(
+        input, target, weight, 
+        ignore_index=(ignore_index if ignore_index is not None else -100),
+        reduction=reduction)

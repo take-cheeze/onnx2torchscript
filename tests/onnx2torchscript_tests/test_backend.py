@@ -93,7 +93,7 @@ class TorchScriptBackend(Backend):
         for n in model.graph.node:
             s = o2t.get_onnx_ts(n.op_type, domain2opset[n.domain], n.domain)
             if s is None:
-                if onnx.defs.has(n.op_type, n.domain):
+                if (n.domain, n.op_type) not in o2t._blacklist_functions and onnx.defs.has(n.op_type, n.domain):
                     schema = onnx.defs.get_schema(n.op_type, domain2opset[n.domain], n.domain)
                     if schema.has_function or schema.has_context_dependent_function:
                         continue
@@ -122,7 +122,6 @@ xfails = [
     "BFLOAT16",
     "STRING",
     "test_div_uint8",
-    "test_reshape_zero",
     "test_identity_opt",
     "test_identity_sequence",
     "test_averagepool_2d_pads_count_include_pad_cpu",
@@ -166,6 +165,7 @@ excludes = [
     "test_densenet121_",
     "test_sequence_insert_at_",
     "test_sequence_model[12345678]_",
+    "test_bernoulli.*_cpu",
 ]
 
 if _has_mps:
@@ -229,6 +229,7 @@ if _has_mps:
         "test_reduce_log_sum_exp.*_cuda",
         "test_celu_expanded_cuda",
         "test_layer_normalization.*_expanded_cuda",
+        "test_bernoulli.*_cuda",
     ]
 
 for x in xfails:
