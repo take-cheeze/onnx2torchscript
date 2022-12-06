@@ -148,6 +148,7 @@ class OnnxModule(torch.nn.Module):
 
             for insert_idx in reversed(sorted(gen_func.keys())):
                 orig_n: onnx.NodeProto = g.node[insert_idx]
+                attr_table = self.attribute_dict(self.node_schema(orig_n), orig_n)
                 body = gen_func[insert_idx]
                 f_n2g_n: Dict[str, str] = {}
                 for g_n, f_n in zip(orig_n.input, body.input):
@@ -159,6 +160,12 @@ class OnnxModule(torch.nn.Module):
                 for f_n in body.node:
                     new_n = onnx.NodeProto()
                     new_n.CopyFrom(f_n)
+                    new_attrs: Dict[int, onnx.AttributeProto] = {}
+                    for a in new_n.attribute:
+                        if a.HasField("ref_attr_name"):
+                            new_a = attr_table[a.ref_attr_name]
+                            a.Clear()
+                            a.CopyFrom(new_a)
                     new_n.name = f"{orig_n.name}_{f_n.name}"
                     inputs = [f_n2g_n[i] for i in f_n.input]
                     new_n.input.clear()
