@@ -160,12 +160,9 @@ class OnnxModule(torch.nn.Module):
                 for f_n in body.node:
                     new_n = onnx.NodeProto()
                     new_n.CopyFrom(f_n)
-                    new_attrs: Dict[int, onnx.AttributeProto] = {}
                     for a in new_n.attribute:
                         if a.HasField("ref_attr_name"):
-                            new_a = attr_table[a.ref_attr_name]
-                            a.Clear()
-                            a.CopyFrom(new_a)
+                            a.CopyFrom(attr_table[a.ref_attr_name])
                     new_n.name = f"{orig_n.name}_{f_n.name}"
                     inputs = [f_n2g_n[i] for i in f_n.input]
                     new_n.input.clear()
