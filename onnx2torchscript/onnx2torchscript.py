@@ -165,7 +165,7 @@ class OnnxModule(torch.nn.Module):
                             a.CopyFrom(attr_table[a.ref_attr_name])
                     new_n.name = f"{orig_n.name}_{f_n.name}"
                     inputs = [f_n2g_n[i] for i in f_n.input]
-                    new_n.input.clear()
+                    new_n.ClearField("input")
                     new_n.input.extend(inputs)
                     outputs = []
                     for o in f_n.output:
@@ -174,7 +174,7 @@ class OnnxModule(torch.nn.Module):
                         else:
                             outputs.append(f"{orig_n.name}_{o}")
                             f_n2g_n[o] = outputs[-1]
-                    new_n.output.clear()
+                    new_n.ClearField("output")
                     new_n.output.extend(outputs)
                     g_body.append(new_n)
                 assert len(g_body) > 0
