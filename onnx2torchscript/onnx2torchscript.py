@@ -39,6 +39,7 @@ _blacklist_functions: Set[Tuple[str, str]] = set([
     ("", "HannWindow"),
     ("", "MelWeightMatrix"),
     ("", "MeanVarianceNormalization"),
+    ("", "SequenceMap"),
 ])
 
 
