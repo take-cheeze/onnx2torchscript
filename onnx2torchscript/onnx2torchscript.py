@@ -30,6 +30,19 @@ def onnx_op(
     return fn
 
 
+# Key type is like: (domain, op name)
+_blacklist_functions: Set[Tuple[str, str]] = set([
+    ("", "BlackmanWindow"),
+    ("", "Range"),
+    ("", "DynamicQuantizeLinear"),
+    ("", "HammingWindow"),
+    ("", "HannWindow"),
+    ("", "MelWeightMatrix"),
+    ("", "MeanVarianceNormalization"),
+    ("", "SequenceMap"),
+])
+
+
 def get_onnx_ts(
     op_type: str, opset_version: int = 0, domain: str = ""
 ) -> Optional[torch._C.ScriptFunction]:
@@ -56,6 +69,7 @@ class OnnxModule(torch.nn.Module):
     def __init__(self, model: onnx.ModelProto) -> None:
         super().__init__()
         self.model = model
+        self.original_model = None
 
         self.meta_mode: bool = False
 
@@ -64,7 +78,23 @@ class OnnxModule(torch.nn.Module):
         for o in self.model.opset_import:
             self.domain2opset[o.domain] = o.version
 
-        # Register constants as buffers to use as meta tensor
+        # Register initializers as buffers
+        for i in self.model.graph.initializer:
+            p = torch.from_numpy(onnx.numpy_helper.to_array(i).copy())
+            self.register_buffer(self.escape_buffer_name(i.name), p)
+            # if p.dtype.is_floating_point:
+            #     setattr(self, i.name, torch.nn.parameter.Parameter(p))
+            # else:
+            #     self.register_buffer(i.name, p)
+
+    def extract_value_infos(self) -> None:
+        self.value_infos: Dict[str, onnx.ValueInfoProto] = {}
+        for i in zip(self.model.graph.input, self.model.graph.output, self.model.graph.value_info):
+            assert i.name not in self.value_infos
+            self.value_infos[i.name] = i
+
+    # Register constants as buffers to use as meta tensor
+    def tensor_as_buffer(self) -> None:
         for o_n in self.model.graph.node:
             o_sch = self.node_schema(o_n)
             o_attrs = self.attribute_dict(o_sch, o_n)
@@ -78,15 +108,88 @@ class OnnxModule(torch.nn.Module):
                 assert not hasattr(self, t_name)
                 self.register_buffer(t_name, attr_value)
 
-        # Register initializers as buffers
-        for i in self.model.graph.initializer:
-            p = torch.from_numpy(onnx.numpy_helper.to_array(i).copy())
-            self.register_buffer(self.escape_buffer_name(i.name), p)
-            # if p.dtype.is_floating_point:
-            #     setattr(self, i.name, torch.nn.parameter.Parameter(p))
-            # else:
-            #     self.register_buffer(i.name, p)
+    def optimize_onnx(self) -> None:
+        self.extract_value_infos()
+        self.expand_functions()
+        self.tensor_as_buffer()
         self.original_params = self.state_dict()
+
+    def modify_model(self) -> None:
+        if self.original_model is not None:
+            return
+        self.original_model = self.model
+        self.model = onnx.ModelProto()
+        self.model.CopyFrom(self.original_model)
+
+    def expand_functions(self, g: Optional[onnx.GraphProto] = None) -> None:
+        if g is None:
+            g = self.model.graph
+
+        while True:
+            gen_func: Dict[int, onnx.FunctionProto] = {}
+            for n_idx, n in enumerate(g.node):
+                if (n.domain, n.op_type) in _blacklist_functions:
+                    continue
+                sch = self.node_schema(n)
+                if sch is None:
+                    continue
+                body: Optional[onnx.FunctionProto] = None
+                if sch.has_function:
+                    body = sch.function_body
+                elif sch.has_context_dependent_function:
+                    in_types = []
+                    for i in n.input:
+                        if i in self.value_infos:
+                            in_types.append(self.value_infos[i].type.SerializeToString())
+                        else:
+                            in_types.append(onnx.ValueInfoProto().SerializeToString())
+                    body_data = sch.get_context_dependent_function(n.SerializeToString(), in_types)
+                    if len(body_data) == 0:
+                        continue
+                    body = onnx.FunctionProto()
+                    body.ParseFromString(body_data)
+
+                if body is not None:
+                    gen_func[n_idx] = body
+            if len(gen_func) == 0:
+                break
+
+            self.modify_model()
+            for insert_idx in reversed(sorted(gen_func.keys())):
+                orig_n: onnx.NodeProto = g.node[insert_idx]
+                attr_table = self.attribute_dict(self.node_schema(orig_n), orig_n)
+                body = gen_func[insert_idx]
+                f_n2g_n: Dict[str, str] = {}
+                for g_n, f_n in zip(orig_n.input, body.input):
+                    f_n2g_n[f_n] = g_n
+                for g_n, f_n in zip(orig_n.output, body.output):
+                    f_n2g_n[f_n] = g_n
+
+                g_body: List[onnx.NodeProto] = []
+                for f_n in body.node:
+                    new_n = onnx.NodeProto()
+                    new_n.CopyFrom(f_n)
+                    for a in new_n.attribute:
+                        if a.HasField("ref_attr_name"):
+                            a.CopyFrom(attr_table[a.ref_attr_name])
+                    new_n.name = f"{orig_n.name}_{f_n.name}"
+                    inputs = [f_n2g_n[i] for i in f_n.input]
+                    new_n.ClearField("input")
+                    new_n.input.extend(inputs)
+                    outputs = []
+                    for o in f_n.output:
+                        if o in f_n2g_n:
+                            outputs.append(f_n2g_n[o])
+                        else:
+                            outputs.append(f"{orig_n.name}_{o}")
+                            f_n2g_n[o] = outputs[-1]
+                    new_n.ClearField("output")
+                    new_n.output.extend(outputs)
+                    g_body.append(new_n)
+                assert len(g_body) > 0
+                g.node.remove(orig_n)
+                for new_idx, new_n in enumerate(g_body):
+                    g.node.insert(insert_idx + new_idx, new_n)
 
     def enable_meta_mode(self, mode: bool = True) -> None:
         if mode:
@@ -217,6 +320,7 @@ def onnx2ts(
     model: onnx.ModelProto, args: Any, verbose: bool = False
 ) -> torch._C.ScriptModule:
     m = OnnxModule(model)
+    m.optimize_onnx()
     try:
         meta_args = to_meta(args)
         m.enable_meta_mode(True)
