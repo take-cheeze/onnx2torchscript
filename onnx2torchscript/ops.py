@@ -1341,3 +1341,18 @@ def op_nll_loss(
         input, target, weight, 
         ignore_index=(ignore_index if ignore_index is not None else -100),
         reduction=reduction)
+
+
+@onnx_op("SoftmaxCrossEntropyLoss", 12)
+def op_sce_loss(
+    scores: Tensor, labels: Tensor, weights: Optional[Tensor] = None,
+    # *,
+    ignore_index: Optional[int] = None,
+    reduction: str = "none",
+) -> Tensor:
+    if reduction == '':
+        reduction = 'none'
+    return torch.nn.functional.cross_entropy(
+        torch.log_softmax(scores, dim=-1), labels, weights, 
+        ignore_index=(ignore_index if ignore_index is not None else -100),
+        reduction=reduction)

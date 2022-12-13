@@ -166,6 +166,7 @@ excludes = [
     "test_sequence_insert_at_",
     "test_sequence_model[12345678]_",
     "test_bernoulli.*_cpu",
+    "test_sce_",
 ]
 
 if _has_mps:
@@ -230,6 +231,7 @@ if _has_mps:
         "test_celu_expanded_cuda",
         "test_layer_normalization.*_expanded_cuda",
         "test_bernoulli.*_cuda",
+        "test_sce_.*cuda",
     ]
 
 for x in xfails:
