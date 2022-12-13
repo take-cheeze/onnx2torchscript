@@ -69,6 +69,7 @@ class OnnxModule(torch.nn.Module):
     def __init__(self, model: onnx.ModelProto) -> None:
         super().__init__()
         self.model = model
+        self.original_model = None
 
         self.meta_mode: bool = False
 
@@ -113,6 +114,13 @@ class OnnxModule(torch.nn.Module):
         self.tensor_as_buffer()
         self.original_params = self.state_dict()
 
+    def modify_model(self) -> None:
+        if self.original_model is not None:
+            return
+        self.original_model = self.model
+        self.model = onnx.ModelProto()
+        self.model.CopyFrom(self.original_model)
+
     def expand_functions(self, g: Optional[onnx.GraphProto] = None) -> None:
         if g is None:
             g = self.model.graph
@@ -146,6 +154,7 @@ class OnnxModule(torch.nn.Module):
             if len(gen_func) == 0:
                 break
 
+            self.modify_model()
             for insert_idx in reversed(sorted(gen_func.keys())):
                 orig_n: onnx.NodeProto = g.node[insert_idx]
                 attr_table = self.attribute_dict(self.node_schema(orig_n), orig_n)
