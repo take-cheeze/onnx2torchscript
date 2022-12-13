@@ -63,7 +63,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest --durations=10
+        pytest --durations=10 -v
     - name: Test script
       run: |
         test_dir=$(python3 -m pip show onnx | awk '/Location: / { print $2 }')/onnx/backend/test/data/node/test_abs
